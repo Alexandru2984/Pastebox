@@ -289,12 +289,12 @@ DEL_PW_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdi
 RESP=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$DEL_PW_ID" \
   -H 'X-Requested-With: PasteBox')
 CODE=$(echo "$RESP" | tail -1)
-assert "Delete protected paste without password returns 403" "403" "$CODE"
+assert "Delete protected paste without password returns 404 (anti-enumeration)" "404" "$CODE"
 
 RESP=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$DEL_PW_ID" \
   -H 'X-Requested-With: PasteBox' -H 'X-Password: wrongpass')
 CODE=$(echo "$RESP" | tail -1)
-assert "Delete with wrong password returns 403" "403" "$CODE"
+assert "Delete with wrong password returns 404 (anti-enumeration)" "404" "$CODE"
 
 RESP=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$DEL_PW_ID" \
   -H 'X-Requested-With: PasteBox' -H 'X-Password: deletetest')

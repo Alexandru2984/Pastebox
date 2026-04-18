@@ -61,18 +61,25 @@ static void clearAuthFailures(const std::string &ip) {
 }
 
 // Cryptographically secure ID generation using OpenSSL RAND_bytes
+// Uses rejection sampling to eliminate modular bias
 std::string PasteController::generateId(int length) {
     static const char chars[] =
         "abcdefghijklmnopqrstuvwxyz"
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "0123456789";
-    static constexpr int charCount = sizeof(chars) - 1;
-    std::vector<unsigned char> buf(length);
-    RAND_bytes(buf.data(), length);
+    static constexpr int charCount = sizeof(chars) - 1; // 62
+    // Largest multiple of 62 that fits in a byte: 62 * 4 = 248
+    static constexpr unsigned char maxUnbiased = (256 / charCount) * charCount - 1; // 247
     std::string id;
     id.reserve(length);
-    for (int i = 0; i < length; ++i)
-        id += chars[buf[i] % charCount];
+    while (static_cast<int>(id.size()) < length) {
+        unsigned char buf[32];
+        RAND_bytes(buf, sizeof(buf));
+        for (size_t i = 0; i < sizeof(buf) && static_cast<int>(id.size()) < length; ++i) {
+            if (buf[i] <= maxUnbiased)
+                id += chars[buf[i] % charCount];
+        }
+    }
     return id;
 }
 
@@ -102,8 +109,8 @@ void PasteController::addSecurityHeaders(const HttpResponsePtr &resp) {
 }
 
 static std::string generateSalt(int length = 16) {
-    unsigned char buf[16];
-    RAND_bytes(buf, length);
+    std::vector<unsigned char> buf(length);
+    RAND_bytes(buf.data(), length);
     std::stringstream ss;
     for (int i = 0; i < length; i++)
         ss << std::hex << std::setw(2) << std::setfill('0') << (int)buf[i];
@@ -482,10 +489,13 @@ void PasteController::getPaste(
                     }
 
                     auto resp = HttpResponse::newHttpJsonResponse(paste);
-                    // ETag for caching (based on paste ID + views count)
+                    // ETag for caching (content hash — stable across views)
                     if (!isBurn) {
-                        std::string etag = "\"" + paste["id"].asString() + "-" +
-                                          std::to_string(paste["views"].asInt64()) + "\"";
+                        std::string etagInput = paste["id"].asString() + "|" +
+                                               paste["title"].asString() + "|" +
+                                               paste["content"].asString() + "|" +
+                                               paste["language"].asString();
+                        std::string etag = "\"" + sha256Hash(etagInput).substr(0, 16) + "\"";
                         resp->addHeader("ETag", etag);
                         resp->addHeader("Cache-Control", "private, no-cache");
                     } else {
@@ -622,9 +632,10 @@ void PasteController::forkPaste(
                 std::string providedPw = sharedReq->getHeader("X-Password");
                 if (!checkPassword(row, providedPw)) {
                     recordAuthFailure(*clientIp);
-                    Json::Value ret; ret["error"] = "Password required"; ret["password_required"] = true;
+                    // Return 404 (not 403) to prevent paste ID enumeration
+                    Json::Value ret; ret["error"] = "Paste not found"; ret["password_required"] = true;
                     auto resp = HttpResponse::newHttpJsonResponse(ret);
-                    resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
+                    resp->setStatusCode(k404NotFound); addSecurityHeaders(resp);
                     (*sharedCallback)(resp); return;
                 }
                 clearAuthFailures(*clientIp);
@@ -635,12 +646,32 @@ void PasteController::forkPaste(
             std::string content = row["content"].as<std::string>();
             std::string language = row["language"].as<std::string>();
 
-            // Allow overriding title/content from request body
+            // Allow overriding title/content from request body with validation
             auto json = sharedReq->getJsonObject();
             if (json) {
-                if (json->isMember("title")) title = (*json)["title"].asString();
-                if (json->isMember("content")) content = (*json)["content"].asString();
-                if (json->isMember("language")) language = (*json)["language"].asString();
+                if (json->isMember("title")) {
+                    title = (*json)["title"].asString();
+                    if (title.size() > MAX_TITLE_LENGTH) title = title.substr(0, MAX_TITLE_LENGTH);
+                }
+                if (json->isMember("content")) {
+                    content = (*json)["content"].asString();
+                    if (content.empty()) {
+                        Json::Value ret; ret["error"] = "Content cannot be empty";
+                        auto resp = HttpResponse::newHttpJsonResponse(ret);
+                        resp->setStatusCode(k400BadRequest); addSecurityHeaders(resp);
+                        (*sharedCallback)(resp); return;
+                    }
+                    if (content.size() > MAX_PASTE_SIZE) {
+                        Json::Value ret; ret["error"] = "Paste too large. Max size is 512KB.";
+                        auto resp = HttpResponse::newHttpJsonResponse(ret);
+                        resp->setStatusCode(k413RequestEntityTooLarge); addSecurityHeaders(resp);
+                        (*sharedCallback)(resp); return;
+                    }
+                }
+                if (json->isMember("language")) {
+                    language = (*json)["language"].asString();
+                    if (language.size() > MAX_LANGUAGE_LENGTH) language = "plaintext";
+                }
             }
 
             db->execSqlAsync(
@@ -720,11 +751,12 @@ void PasteController::deletePaste(
                 std::string providedPw = sharedReq->getHeader("X-Password");
                 if (!checkPassword(row, providedPw)) {
                     recordAuthFailure(*clientIp);
+                    // Return 404 (not 403) to prevent paste ID enumeration
                     Json::Value ret;
-                    ret["error"] = "Password required to delete this paste";
+                    ret["error"] = "Paste not found";
                     ret["password_required"] = true;
                     auto resp = HttpResponse::newHttpJsonResponse(ret);
-                    resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
+                    resp->setStatusCode(k404NotFound); addSecurityHeaders(resp);
                     (*sharedCallback)(resp); return;
                 }
                 clearAuthFailures(*clientIp);

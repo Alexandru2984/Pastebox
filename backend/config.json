@@ -1,7 +1,7 @@
 {
     "listeners": [
         {
-            "address": "0.0.0.0",
+            "address": "127.0.0.1",
             "port": 7777,
             "https": false
         }
@@ -31,6 +31,6 @@
         "run_as_daemon": false,
         "use_sendfile": true,
         "idle_connection_timeout": 60,
-        "client_max_body_size": "5M"
+        "client_max_body_size": "512K"
     }
 }

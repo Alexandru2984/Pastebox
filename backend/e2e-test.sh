@@ -139,7 +139,7 @@ assert "Edit without password returns 404" "404" "$EDIT_NOPW_CODE"
 # Delete without password fails
 DEL_NOPW=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$PW_ID" -H 'X-Requested-With: PasteBox')
 DEL_NOPW_CODE=$(echo "$DEL_NOPW" | tail -1)
-assert "Delete without password returns 403" "403" "$DEL_NOPW_CODE"
+assert "Delete without password returns 404 (anti-enumeration)" "404" "$DEL_NOPW_CODE"
 
 # Delete with password works
 DEL_PW=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$PW_ID" \
