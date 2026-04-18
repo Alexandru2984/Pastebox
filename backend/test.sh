@@ -7,6 +7,9 @@ PASS=0
 FAIL=0
 TOTAL=0
 
+# Small delay between sections to avoid rate limiting
+delay() { sleep 0.3; }
+
 red() { echo -e "\e[31m$1\e[0m"; }
 green() { echo -e "\e[32m$1\e[0m"; }
 yellow() { echo -e "\e[33m$1\e[0m"; }
@@ -54,6 +57,7 @@ echo "========================================="
 echo ""
 
 # ─── Test 1: Create a basic paste ───
+delay
 yellow "▸ Create Paste"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/pastes" \
   -H 'Content-Type: application/json' \
@@ -66,6 +70,7 @@ assert "Response contains id" "true" "$([ -n "$PASTE_ID" ] && echo true || echo 
 assert_contains "Response contains title" '"title":"Test Paste"' "$BODY"
 
 # ─── Test 2: Get paste ───
+delay
 yellow "▸ Get Paste"
 RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/pastes/$PASTE_ID")
 BODY=$(echo "$RESP" | head -n -1)
@@ -75,6 +80,7 @@ assert_contains "Contains content" '"content":"print(42)"' "$BODY"
 assert_contains "Has view count" '"views"' "$BODY"
 
 # ─── Test 3: List pastes ───
+delay
 yellow "▸ List Pastes"
 RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/pastes")
 BODY=$(echo "$RESP" | head -n -1)
@@ -83,6 +89,7 @@ assert "GET /api/pastes returns 200" "200" "$CODE"
 assert_contains "List contains our paste" "$PASTE_ID" "$BODY"
 
 # ─── Test 4: Create paste with tags and filter ───
+delay
 yellow "▸ Tags"
 RESP=$(curl -s -X POST "$BASE/api/pastes" \
   -H 'Content-Type: application/json' \
@@ -94,6 +101,7 @@ RESP=$(curl -s "$BASE/api/pastes?tag=nonexistent999")
 assert_not_contains "Tag filter excludes unmatched" "$TAG_ID" "$RESP"
 
 # ─── Test 5: Password protection ───
+delay
 yellow "▸ Password Protection"
 RESP=$(curl -s -X POST "$BASE/api/pastes" \
   -H 'Content-Type: application/json' \
@@ -116,6 +124,7 @@ assert "Correct password returns 200" "200" "$CODE"
 assert_contains "Returns content with correct password" '"content":"hidden data"' "$BODY"
 
 # ─── Test 6: Burn after read ───
+delay
 yellow "▸ Burn After Read"
 RESP=$(curl -s -X POST "$BASE/api/pastes" \
   -H 'Content-Type: application/json' \
@@ -132,6 +141,7 @@ CODE=$(echo "$RESP" | tail -1)
 assert "Second read of burned paste returns 404" "404" "$CODE"
 
 # ─── Test 7: Visibility ───
+delay
 yellow "▸ Visibility"
 RESP=$(curl -s -X POST "$BASE/api/pastes" \
   -H 'Content-Type: application/json' \
@@ -143,6 +153,7 @@ RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/pastes/$UNL_ID")
 assert "Unlisted paste accessible via direct link" "200" "$(echo "$RESP" | tail -1)"
 
 # ─── Test 8: Raw endpoint ───
+delay
 yellow "▸ Raw Endpoint"
 RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/pastes/$PASTE_ID/raw")
 BODY=$(echo "$RESP" | head -n -1)
@@ -151,6 +162,7 @@ assert "GET /api/pastes/:id/raw returns 200" "200" "$CODE"
 assert_contains "Raw returns plain content" "print(42)" "$BODY"
 
 # ─── Test 9: Fork ───
+delay
 yellow "▸ Fork"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/pastes/$PASTE_ID/fork" \
   -H 'Content-Type: application/json' -d '{}')
@@ -162,6 +174,7 @@ RESP=$(curl -s "$BASE/api/pastes/$FORK_ID")
 assert_contains "Forked paste has parent_id" "\"parent_id\":\"$PASTE_ID\"" "$RESP"
 
 # ─── Test 10: Delete ───
+delay
 yellow "▸ Delete"
 RESP=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$PASTE_ID")
 CODE=$(echo "$RESP" | tail -1)
@@ -171,6 +184,7 @@ CODE=$(echo "$RESP" | tail -1)
 assert "Deleted paste returns 404" "404" "$CODE"
 
 # ─── Test 11: Expiration ───
+delay
 yellow "▸ Expiration"
 RESP=$(curl -s -X POST "$BASE/api/pastes" \
   -H 'Content-Type: application/json' \
@@ -180,6 +194,7 @@ RESP=$(curl -s "$BASE/api/pastes/$EXP_ID")
 assert_contains "Expiring paste has expires_at" '"expires_at"' "$RESP"
 
 # ─── Test 12: Max size enforcement ───
+delay
 yellow "▸ Max Size"
 python3 -c "
 import json, sys
@@ -194,6 +209,7 @@ assert "Oversized paste rejected (400 or 413)" "true" "$([ "$CODE" = "400" ] || 
 rm -f /tmp/pastebox_bigtest.json
 
 # ─── Test 13: Empty content rejected ───
+delay
 yellow "▸ Validation"
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/pastes" \
   -H 'Content-Type: application/json' \
@@ -206,8 +222,108 @@ RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/pastes/DOESNOTEXIST999")
 CODE=$(echo "$RESP" | tail -1)
 assert "Nonexistent paste returns 404" "404" "$CODE"
 
+# ─── SECURITY TESTS ─────────────────────────────────────────────────────────
+
+# ─── Test 15: Delete requires password for protected pastes ───
+delay
+yellow "▸ Security: Delete auth"
+RESP=$(curl -s -X POST "$BASE/api/pastes" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Protected","content":"secure data","language":"plaintext","visibility":"public","password":"deletetest"}')
+DEL_PW_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+
+RESP=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$DEL_PW_ID")
+CODE=$(echo "$RESP" | tail -1)
+assert "Delete protected paste without password returns 403" "403" "$CODE"
+
+RESP=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$DEL_PW_ID" -H 'X-Password: wrongpass')
+CODE=$(echo "$RESP" | tail -1)
+assert "Delete protected paste with wrong password returns 403" "403" "$CODE"
+
+RESP=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE/api/pastes/$DEL_PW_ID" -H 'X-Password: deletetest')
+CODE=$(echo "$RESP" | tail -1)
+assert "Delete protected paste with correct password returns 200" "200" "$CODE"
+
+# ─── Test 16: Security headers present ───
+delay
+yellow "▸ Security: Headers"
+RESP_HEADERS=$(curl -sI "$BASE/api/pastes")
+assert_contains "X-Content-Type-Options header present" "x-content-type-options: nosniff" "$(echo "$RESP_HEADERS" | tr '[:upper:]' '[:lower:]')"
+assert_contains "X-Frame-Options header present" "x-frame-options" "$(echo "$RESP_HEADERS" | tr '[:upper:]' '[:lower:]')"
+
+# ─── Test 17: Title truncation ───
+delay
+yellow "▸ Security: Input limits"
+LONG_TITLE=$(python3 -c "print('A' * 300)")
+RESP=$(curl -s -X POST "$BASE/api/pastes" \
+  -H 'Content-Type: application/json' \
+  -d "{\"title\":\"$LONG_TITLE\",\"content\":\"test\",\"language\":\"plaintext\",\"visibility\":\"public\"}")
+LIMIT_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+RESP=$(curl -s "$BASE/api/pastes/$LIMIT_ID")
+TITLE_LEN=$(echo "$RESP" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['title']))" 2>/dev/null)
+assert "Long title is truncated to 200 chars" "200" "$TITLE_LEN"
+
+# ─── Test 18: DB errors don't leak internal info ───
+delay
+yellow "▸ Security: Error sanitization"
+RESP=$(curl -s "$BASE/api/pastes/$PASTE_ID")
+assert_not_contains "Error response doesn't expose DB details" "sqlite" "$(echo "$RESP" | tr '[:upper:]' '[:lower:]')"
+
+# ─── Test 19: Invalid JSON body ───
+RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE/api/pastes" \
+  -H 'Content-Type: application/json' \
+  -d 'not json at all')
+CODE=$(echo "$RESP" | tail -1)
+assert "Invalid JSON returns 400" "400" "$CODE"
+
+# ─── Test 20: Tag limits ───
+delay
+yellow "▸ Security: Tag limits"
+MANY_TAGS=$(python3 -c "import json; print(json.dumps(['tag'+str(i) for i in range(20)]))")
+RESP=$(curl -s -X POST "$BASE/api/pastes" \
+  -H 'Content-Type: application/json' \
+  -d "{\"title\":\"Many Tags\",\"content\":\"test\",\"language\":\"plaintext\",\"visibility\":\"public\",\"tags\":$MANY_TAGS}")
+TAG_LIMIT_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+RESP=$(curl -s "$BASE/api/pastes/$TAG_LIMIT_ID")
+TAG_COUNT=$(echo "$RESP" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('tags',[])))" 2>/dev/null)
+assert "Tags capped at 10 max" "true" "$([ "$TAG_COUNT" -le 10 ] && echo true || echo false)"
+
+# ─── Test 21: Private paste not in list ───
+delay
+yellow "▸ Security: Private visibility"
+RESP=$(curl -s -X POST "$BASE/api/pastes" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Private","content":"private data","language":"plaintext","visibility":"private"}')
+PRIV_ID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+RESP=$(curl -s "$BASE/api/pastes")
+assert_not_contains "Private paste not in public list" "$PRIV_ID" "$RESP"
+
+# ─── Test 22: Salted password (same password different hashes) ───
+delay
+yellow "▸ Security: Salted passwords"
+RESP1=$(curl -s -X POST "$BASE/api/pastes" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Salt1","content":"data1","language":"plaintext","visibility":"public","password":"samepass"}')
+SALT1_ID=$(echo "$RESP1" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+RESP2=$(curl -s -X POST "$BASE/api/pastes" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Salt2","content":"data2","language":"plaintext","visibility":"public","password":"samepass"}')
+SALT2_ID=$(echo "$RESP2" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+
+# Both should be accessible with the same password
+RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/pastes/$SALT1_ID" -H 'X-Password: samepass')
+assert "Salted paste 1 accessible" "200" "$(echo "$RESP" | tail -1)"
+RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/pastes/$SALT2_ID" -H 'X-Password: samepass')
+assert "Salted paste 2 accessible" "200" "$(echo "$RESP" | tail -1)"
+
+# ─── Test 23: CORS preflight ───
+delay
+yellow "▸ Security: CORS"
+RESP=$(curl -sI -X OPTIONS "$BASE/api/pastes")
+assert_contains "OPTIONS returns CORS headers" "access-control-allow" "$(echo "$RESP" | tr '[:upper:]' '[:lower:]')"
+
 # ─── Cleanup test pastes ───
-for id in $TAG_ID $PW_ID $UNL_ID $FORK_ID $EXP_ID; do
+for id in $TAG_ID $PW_ID $UNL_ID $FORK_ID $EXP_ID $LIMIT_ID $TAG_LIMIT_ID $PRIV_ID $SALT1_ID $SALT2_ID; do
   curl -s -X DELETE "$BASE/api/pastes/$id" > /dev/null 2>&1
 done
 

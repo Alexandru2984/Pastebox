@@ -84,6 +84,20 @@ void cleanupExpired() {
     } catch (...) {}
 }
 
+void cleanupRateLimits() {
+    std::lock_guard<std::mutex> lock(rateMutex);
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = rateLimits.begin(); it != rateLimits.end(); ) {
+        double elapsed = std::chrono::duration<double>(now - it->second.lastRefill).count();
+        // Remove entries idle for over 5 minutes
+        if (elapsed > 300.0) {
+            it = rateLimits.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 int main() {
     drogon::app().loadConfigFile("../config.json");
 
@@ -120,6 +134,8 @@ int main() {
                 resp->addHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
                 resp->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password");
                 resp->addHeader("Access-Control-Max-Age", "86400");
+                resp->addHeader("X-Content-Type-Options", "nosniff");
+                resp->addHeader("X-Frame-Options", "SAMEORIGIN");
                 callback(resp);
                 return;
             }
@@ -133,6 +149,9 @@ int main() {
 
     // Expiration cleanup every 60 seconds
     drogon::app().getLoop()->runEvery(60.0, []() { cleanupExpired(); });
+
+    // Rate limit map cleanup every 5 minutes
+    drogon::app().getLoop()->runEvery(300.0, []() { cleanupRateLimits(); });
 
     std::cout << "[PasteBox] Starting on http://localhost:7777" << std::endl;
     drogon::app().run();

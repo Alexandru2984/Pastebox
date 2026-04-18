@@ -36,7 +36,9 @@ public:
 private:
     static std::string generateId(int length = 8);
     static void addCorsHeaders(const HttpResponsePtr &resp);
+    static void addSecurityHeaders(const HttpResponsePtr &resp);
     static std::string sha256Hash(const std::string &input);
+    static std::string hashPassword(const std::string &password);
     static Json::Value pasteRowToJson(const drogon::orm::Row &row, bool includeContent = true);
     static bool isExpired(const drogon::orm::Row &row);
     static bool checkPassword(const drogon::orm::Row &row, const std::string &password);
