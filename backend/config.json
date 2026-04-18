@@ -1,0 +1,36 @@
+{
+    "listeners": [
+        {
+            "address": "0.0.0.0",
+            "port": 7777,
+            "https": false
+        }
+    ],
+    "db_clients": [
+        {
+            "rdbms": "sqlite3",
+            "filename": "pastebox.db",
+            "is_fast": false,
+            "number_of_connections": 1,
+            "timeout": 10.0
+        }
+    ],
+    "app": {
+        "number_of_threads": 4,
+        "document_root": "./public",
+        "home_page": "index.html",
+        "upload_path": "uploads",
+        "file_types": [
+            "gif", "png", "jpg", "js", "css", "html", "ico",
+            "svg", "webp", "woff", "woff2", "ttf", "eot", "json", "map"
+        ],
+        "use_gzip": true,
+        "log": {
+            "log_level": "INFO"
+        },
+        "run_as_daemon": false,
+        "use_sendfile": true,
+        "idle_connection_timeout": 60,
+        "client_max_body_size": "5M"
+    }
+}
