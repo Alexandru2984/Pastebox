@@ -1,36 +1,38 @@
 <script>
-  import { createPaste } from './lib/api.js';
-  import { LANGUAGES } from './lib/languages.js';
+  import { onMount, onDestroy } from 'svelte';
+  import CreatePaste from './CreatePaste.svelte';
   import PasteView from './PasteView.svelte';
   import PasteList from './PasteList.svelte';
+  import EmbedView from './EmbedView.svelte';
+  import ThemeSwitcher from './ThemeSwitcher.svelte';
+  import Toast from './Toast.svelte';
+  import { initTheme } from './lib/themes.js';
 
   let currentView = 'create';
-  let currentPasteId = null;
+  let currentId = '';
 
-  let title = '';
-  let content = '';
-  let language = 'plaintext';
-  let submitting = false;
-  let error = '';
-
-  function checkRoute() {
-    const hash = window.location.hash;
+  function parseHash() {
+    const hash = window.location.hash || '#/';
     if (hash.startsWith('#/paste/')) {
-      currentPasteId = hash.replace('#/paste/', '');
       currentView = 'view';
+      currentId = hash.replace('#/paste/', '');
+    } else if (hash.startsWith('#/embed/')) {
+      currentView = 'embed';
+      currentId = hash.replace('#/embed/', '');
     } else if (hash === '#/list') {
       currentView = 'list';
+      currentId = '';
     } else {
       currentView = 'create';
+      currentId = '';
     }
   }
 
-  checkRoute();
-  window.addEventListener('hashchange', checkRoute);
-
-  function navigate(view, id = null) {
+  function navigate(view, id = '') {
     if (view === 'view' && id) {
       window.location.hash = `#/paste/${id}`;
+    } else if (view === 'embed' && id) {
+      window.location.hash = `#/embed/${id}`;
     } else if (view === 'list') {
       window.location.hash = '#/list';
     } else {
@@ -38,139 +40,87 @@
     }
   }
 
-  async function handleSubmit() {
-    if (!content.trim()) {
-      error = 'Paste content cannot be empty';
-      return;
-    }
-    error = '';
-    submitting = true;
-    try {
-      const result = await createPaste({
-        title: title || 'Untitled',
-        content,
-        language
-      });
-      title = '';
-      content = '';
-      language = 'plaintext';
-      navigate('view', result.id);
-    } catch (e) {
-      error = e.message;
-    } finally {
-      submitting = false;
-    }
+  function handleNav(e) {
+    const { view, id } = e.detail;
+    navigate(view, id);
   }
 
   function handleKeydown(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      handleSubmit();
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+    if (e.key === 'n' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      navigate('create');
+    } else if (e.key === 'l' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      navigate('list');
     }
   }
+
+  onMount(() => {
+    initTheme();
+    parseHash();
+    window.addEventListener('hashchange', parseHash);
+    window.addEventListener('keydown', handleKeydown);
+  });
+
+  onDestroy(() => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('hashchange', parseHash);
+      window.removeEventListener('keydown', handleKeydown);
+    }
+  });
 </script>
 
-<div class="min-h-screen flex flex-col">
-  <header class="border-b border-[var(--border)] px-6 py-4">
-    <div class="max-w-5xl mx-auto flex items-center justify-between">
-      <button
-        class="flex items-center gap-2 text-xl font-bold text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors cursor-pointer bg-transparent border-none"
-        on:click={() => navigate('create')}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-        </svg>
-        PasteBox
-      </button>
-      <nav class="flex gap-4">
-        <button
-          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer border-none
-            {currentView === 'create'
-              ? 'bg-[var(--accent)] text-[var(--bg-primary)]'
-              : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}"
-          on:click={() => navigate('create')}
-        >
-          + New Paste
+{#if currentView === 'embed'}
+  <EmbedView pasteId={currentId} />
+{:else}
+  <div class="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
+    <!-- Header -->
+    <header class="border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+      <div class="max-w-5xl mx-auto flex items-center justify-between px-6 py-3.5">
+        <button on:click={() => navigate('create')}
+          class="flex items-center gap-2.5 bg-transparent border-none cursor-pointer p-0">
+          <span class="text-2xl">📋</span>
+          <span class="text-xl font-bold text-[var(--text-primary)]">PasteBox</span>
         </button>
-        <button
-          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer border-none
-            {currentView === 'list'
-              ? 'bg-[var(--accent)] text-[var(--bg-primary)]'
-              : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}"
-          on:click={() => navigate('list')}
-        >
-          Recent
-        </button>
-      </nav>
-    </div>
-  </header>
-
-  <main class="flex-1 max-w-5xl mx-auto w-full px-6 py-8">
-    {#if currentView === 'create'}
-      <div class="space-y-6">
-        <h2 class="text-2xl font-semibold text-[var(--text-primary)]">Create New Paste</h2>
-
-        {#if error}
-          <div class="bg-red-900/30 border border-[var(--red)] text-[var(--red)] px-4 py-3 rounded-lg">
-            {error}
-          </div>
-        {/if}
-
-        <div class="flex gap-4">
-          <input
-            bind:value={title}
-            type="text"
-            placeholder="Title (optional)"
-            class="flex-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg px-4 py-3
-              text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:border-[var(--accent)]
-              focus:outline-none transition-colors"
-          />
-          <select
-            bind:value={language}
-            class="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg px-4 py-3
-              text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none transition-colors
-              cursor-pointer"
-          >
-            {#each LANGUAGES as lang}
-              <option value={lang}>{lang}</option>
-            {/each}
-          </select>
-        </div>
-
-        <textarea
-          bind:value={content}
-          on:keydown={handleKeydown}
-          placeholder="Paste your code here... (Ctrl+Enter to submit)"
-          rows="20"
-          class="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg px-4 py-3
-            text-[var(--text-primary)] placeholder-[var(--text-secondary)] font-mono text-sm
-            focus:border-[var(--accent)] focus:outline-none transition-colors resize-y"
-          spellcheck="false"
-        ></textarea>
-
-        <div class="flex justify-between items-center">
-          <span class="text-sm text-[var(--text-secondary)]">
-            {content.length} characters · {content.split('\n').length} lines
-          </span>
-          <button
-            on:click={handleSubmit}
-            disabled={submitting}
-            class="px-6 py-3 bg-[var(--accent)] text-[var(--bg-primary)] font-semibold rounded-lg
-              hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50 cursor-pointer border-none"
-          >
-            {submitting ? 'Creating...' : 'Create Paste'}
+        <nav class="flex items-center gap-2">
+          <button on:click={() => navigate('create')}
+            class="px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer transition-colors
+              {currentView === 'create' ? 'bg-[var(--accent)] text-[var(--bg-primary)]' : 'bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}">
+            + New
           </button>
+          <button on:click={() => navigate('list')}
+            class="px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer transition-colors
+              {currentView === 'list' ? 'bg-[var(--accent)] text-[var(--bg-primary)]' : 'bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}">
+            Browse
+          </button>
+          <div class="w-px h-5 bg-[var(--border)] mx-1"></div>
+          <ThemeSwitcher />
+        </nav>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="max-w-5xl mx-auto px-6 py-6">
+      {#if currentView === 'create'}
+        <CreatePaste on:navigate={handleNav} />
+      {:else if currentView === 'view'}
+        <PasteView pasteId={currentId} on:navigate={handleNav} />
+      {:else if currentView === 'list'}
+        <PasteList on:view={(e) => navigate('view', e.detail)} />
+      {/if}
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-[var(--border)] py-4 mt-12">
+      <div class="max-w-5xl mx-auto px-6 flex items-center justify-between text-xs text-[var(--text-secondary)]">
+        <span>PasteBox — code sharing made simple</span>
+        <div class="flex gap-4">
+          <span title="Press N for new, L for list">⌨ Shortcuts</span>
         </div>
       </div>
+    </footer>
+  </div>
 
-    {:else if currentView === 'view'}
-      <PasteView pasteId={currentPasteId} on:navigate={(e) => navigate(e.detail)} />
-
-    {:else if currentView === 'list'}
-      <PasteList on:view={(e) => navigate('view', e.detail)} />
-    {/if}
-  </main>
-
-  <footer class="border-t border-[var(--border)] px-6 py-4 text-center text-sm text-[var(--text-secondary)]">
-    PasteBox · Built with Drogon/C++ & Svelte
-  </footer>
-</div>
+  <Toast />
+{/if}
