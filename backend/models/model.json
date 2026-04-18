@@ -14,7 +14,7 @@
     //user: User name
     "user": "",
     //password or passwd: Password
-    "password": "",
+    "password": "",  // set via env var
     //client_encoding: The character set used by drogon_ctl. it is empty string by default which 
     //means use the default character set.
     //"client_encoding": "",

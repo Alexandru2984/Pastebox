@@ -286,5 +286,5 @@ custom_config:
   opaque: drogonOpaque
   credentials:
     - user: drogon
-      password: dr0g0n
+      password: ''  # set via env var in production
 
