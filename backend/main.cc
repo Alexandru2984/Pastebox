@@ -38,6 +38,10 @@ bool checkRateLimit(const std::string &ip) {
 void initDatabase() {
     auto db = drogon::app().getDbClient();
 
+    // Enable WAL mode for better concurrent read/write performance
+    db->execSqlSync("PRAGMA journal_mode=WAL");
+    db->execSqlSync("PRAGMA foreign_keys=ON");
+
     db->execSqlSync(
         "CREATE TABLE IF NOT EXISTS pastes ("
         "  id TEXT PRIMARY KEY,"
@@ -68,7 +72,15 @@ void initDatabase() {
     try { db->execSqlSync("ALTER TABLE pastes ADD COLUMN visibility TEXT DEFAULT 'public'"); } catch (...) {}
     try { db->execSqlSync("ALTER TABLE pastes ADD COLUMN parent_id TEXT"); } catch (...) {}
 
-    std::cout << "[PasteBox] Database initialized." << std::endl;
+    // Create indexes for query performance
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_visibility ON pastes(visibility)");
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_expires ON pastes(expires_at)");
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_created ON pastes(created_at DESC)");
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_parent ON pastes(parent_id)");
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_tags_paste ON tags(paste_id)");
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag)");
+
+    std::cout << "[PasteBox] Database initialized (WAL mode, indexes created)." << std::endl;
 }
 
 void cleanupExpired() {
@@ -130,12 +142,13 @@ int main() {
            drogon::AdviceChainCallback &&chainCallback) {
             if (req->method() == drogon::Options) {
                 auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->addHeader("Access-Control-Allow-Origin", "*");
+                resp->addHeader("Access-Control-Allow-Origin", "https://pastebox.micutu.com");
                 resp->addHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
                 resp->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password");
                 resp->addHeader("Access-Control-Max-Age", "86400");
                 resp->addHeader("X-Content-Type-Options", "nosniff");
-                resp->addHeader("X-Frame-Options", "SAMEORIGIN");
+                resp->addHeader("X-Frame-Options", "DENY");
+                resp->addHeader("Vary", "Origin");
                 callback(resp);
                 return;
             }

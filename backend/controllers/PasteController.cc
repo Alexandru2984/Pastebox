@@ -2,9 +2,11 @@
 #include <drogon/orm/DbClient.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
-#include <random>
 #include <sstream>
 #include <iomanip>
+#include <mutex>
+#include <unordered_map>
+#include <chrono>
 
 using namespace drogon;
 using namespace drogon::orm;
@@ -15,31 +17,85 @@ static constexpr size_t MAX_TAG_LENGTH = 50;
 static constexpr size_t MAX_TAGS_COUNT = 10;
 static constexpr size_t MAX_LANGUAGE_LENGTH = 30;
 
+// Brute-force protection: track failed password attempts per IP
+struct AuthAttempt {
+    int failures;
+    std::chrono::steady_clock::time_point lastFailure;
+};
+static std::unordered_map<std::string, AuthAttempt> authAttempts;
+static std::mutex authMutex;
+static constexpr int MAX_AUTH_FAILURES = 5;
+static constexpr double AUTH_LOCKOUT_SECONDS = 300.0; // 5 min lockout
+
+static bool isAuthLocked(const std::string &ip) {
+    std::lock_guard<std::mutex> lock(authMutex);
+    auto it = authAttempts.find(ip);
+    if (it == authAttempts.end()) return false;
+    double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - it->second.lastFailure).count();
+    if (elapsed > AUTH_LOCKOUT_SECONDS) {
+        authAttempts.erase(it);
+        return false;
+    }
+    return it->second.failures >= MAX_AUTH_FAILURES;
+}
+
+static void recordAuthFailure(const std::string &ip) {
+    std::lock_guard<std::mutex> lock(authMutex);
+    auto &entry = authAttempts[ip];
+    auto now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(now - entry.lastFailure).count();
+    if (elapsed > AUTH_LOCKOUT_SECONDS) {
+        entry.failures = 0;
+    }
+    entry.failures++;
+    entry.lastFailure = now;
+}
+
+static void clearAuthFailures(const std::string &ip) {
+    std::lock_guard<std::mutex> lock(authMutex);
+    authAttempts.erase(ip);
+}
+
+// Cryptographically secure ID generation using OpenSSL RAND_bytes
 std::string PasteController::generateId(int length) {
     static const char chars[] =
         "abcdefghijklmnopqrstuvwxyz"
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "0123456789";
-    static thread_local std::mt19937 rng{std::random_device{}()};
-    std::uniform_int_distribution<int> dist(0, sizeof(chars) - 2);
+    static constexpr int charCount = sizeof(chars) - 1;
+    std::vector<unsigned char> buf(length);
+    RAND_bytes(buf.data(), length);
     std::string id;
     id.reserve(length);
     for (int i = 0; i < length; ++i)
-        id += chars[dist(rng)];
+        id += chars[buf[i] % charCount];
     return id;
 }
 
 void PasteController::addCorsHeaders(const HttpResponsePtr &resp) {
-    resp->addHeader("Access-Control-Allow-Origin", "*");
+    resp->addHeader("Access-Control-Allow-Origin", "https://pastebox.micutu.com");
     resp->addHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     resp->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password");
+    resp->addHeader("Vary", "Origin");
 }
 
 void PasteController::addSecurityHeaders(const HttpResponsePtr &resp) {
     addCorsHeaders(resp);
     resp->addHeader("X-Content-Type-Options", "nosniff");
-    resp->addHeader("X-Frame-Options", "SAMEORIGIN");
+    resp->addHeader("X-Frame-Options", "DENY");
     resp->addHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    resp->addHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    resp->addHeader("X-XSS-Protection", "1; mode=block");
+    resp->addHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    resp->addHeader("Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'");
 }
 
 static std::string generateSalt(int length = 16) {
@@ -334,9 +390,22 @@ void PasteController::getPaste(
     auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
     auto sharedReq = req;
 
+    auto clientIp = std::make_shared<std::string>(req->peerAddr().toIp());
+
+    // Check brute-force lockout before hitting DB
+    if (isAuthLocked(*clientIp)) {
+        Json::Value ret;
+        ret["error"] = "Too many failed attempts. Try again later.";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k429TooManyRequests);
+        resp->addHeader("Retry-After", "300");
+        addSecurityHeaders(resp);
+        (*sharedCallback)(resp); return;
+    }
+
     db->execSqlAsync(
         "SELECT * FROM pastes WHERE id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))",
-        [sharedCallback, sharedReq, db, id](const Result &result) {
+        [sharedCallback, sharedReq, db, id, clientIp](const Result &result) {
             if (result.empty()) {
                 Json::Value ret; ret["error"] = "Paste not found";
                 auto resp = HttpResponse::newHttpJsonResponse(ret);
@@ -345,10 +414,11 @@ void PasteController::getPaste(
             }
             const auto &row = result[0];
 
-            // Check password
+            // Check password with brute-force protection
             if (!row["password_hash"].isNull() && !row["password_hash"].as<std::string>().empty()) {
                 std::string providedPw = sharedReq->getHeader("X-Password");
                 if (!checkPassword(row, providedPw)) {
+                    recordAuthFailure(*clientIp);
                     Json::Value ret;
                     ret["error"] = "Password required";
                     ret["password_required"] = true;
@@ -356,6 +426,7 @@ void PasteController::getPaste(
                     resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
                     (*sharedCallback)(resp); return;
                 }
+                clearAuthFailures(*clientIp);
             }
 
             bool isBurn = (!row["burn_after_read"].isNull() && row["burn_after_read"].as<int64_t>() == 1);
@@ -411,9 +482,21 @@ void PasteController::getRawPaste(
     auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
     auto sharedReq = req;
 
+    auto clientIp = std::make_shared<std::string>(req->peerAddr().toIp());
+
+    if (isAuthLocked(*clientIp)) {
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k429TooManyRequests);
+        resp->setContentTypeString("text/plain");
+        resp->setBody("Too many failed attempts. Try again later.");
+        resp->addHeader("Retry-After", "300");
+        addSecurityHeaders(resp);
+        (*sharedCallback)(resp); return;
+    }
+
     db->execSqlAsync(
         "SELECT * FROM pastes WHERE id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))",
-        [sharedCallback, sharedReq](const Result &result) {
+        [sharedCallback, sharedReq, clientIp](const Result &result) {
             if (result.empty()) {
                 auto resp = HttpResponse::newHttpResponse();
                 resp->setStatusCode(k404NotFound);
@@ -424,10 +507,11 @@ void PasteController::getRawPaste(
             }
             const auto &row = result[0];
 
-            // Check password
+            // Check password with brute-force protection
             if (!row["password_hash"].isNull() && !row["password_hash"].as<std::string>().empty()) {
                 std::string providedPw = sharedReq->getHeader("X-Password");
                 if (!checkPassword(row, providedPw)) {
+                    recordAuthFailure(*clientIp);
                     auto resp = HttpResponse::newHttpResponse();
                     resp->setStatusCode(k403Forbidden);
                     resp->setContentTypeString("text/plain");
@@ -435,6 +519,7 @@ void PasteController::getRawPaste(
                     addSecurityHeaders(resp);
                     (*sharedCallback)(resp); return;
                 }
+                clearAuthFailures(*clientIp);
             }
 
             auto resp = HttpResponse::newHttpResponse();
@@ -463,9 +548,21 @@ void PasteController::forkPaste(
     auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
     auto sharedReq = req;
 
+    auto clientIp = std::make_shared<std::string>(req->peerAddr().toIp());
+
+    if (isAuthLocked(*clientIp)) {
+        Json::Value ret;
+        ret["error"] = "Too many failed attempts. Try again later.";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k429TooManyRequests);
+        resp->addHeader("Retry-After", "300");
+        addSecurityHeaders(resp);
+        (*sharedCallback)(resp); return;
+    }
+
     db->execSqlAsync(
         "SELECT * FROM pastes WHERE id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))",
-        [sharedCallback, sharedReq, db, id](const Result &result) {
+        [sharedCallback, sharedReq, db, id, clientIp](const Result &result) {
             if (result.empty()) {
                 Json::Value ret; ret["error"] = "Paste not found";
                 auto resp = HttpResponse::newHttpJsonResponse(ret);
@@ -474,15 +571,17 @@ void PasteController::forkPaste(
             }
             const auto &row = result[0];
 
-            // Check password
+            // Check password with brute-force protection
             if (!row["password_hash"].isNull() && !row["password_hash"].as<std::string>().empty()) {
                 std::string providedPw = sharedReq->getHeader("X-Password");
                 if (!checkPassword(row, providedPw)) {
+                    recordAuthFailure(*clientIp);
                     Json::Value ret; ret["error"] = "Password required"; ret["password_required"] = true;
                     auto resp = HttpResponse::newHttpJsonResponse(ret);
                     resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
                     (*sharedCallback)(resp); return;
                 }
+                clearAuthFailures(*clientIp);
             }
 
             std::string newId = generateId();
@@ -538,10 +637,22 @@ void PasteController::deletePaste(
     auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
     auto sharedReq = req;
 
+    auto clientIp = std::make_shared<std::string>(req->peerAddr().toIp());
+
+    if (isAuthLocked(*clientIp)) {
+        Json::Value ret;
+        ret["error"] = "Too many failed attempts. Try again later.";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k429TooManyRequests);
+        resp->addHeader("Retry-After", "300");
+        addSecurityHeaders(resp);
+        (*sharedCallback)(resp); return;
+    }
+
     // First check if paste exists and is password-protected
     db->execSqlAsync(
         "SELECT password_hash FROM pastes WHERE id = ?",
-        [sharedCallback, sharedReq, db, id](const Result &result) {
+        [sharedCallback, sharedReq, db, id, clientIp](const Result &result) {
             if (result.empty()) {
                 Json::Value ret; ret["error"] = "Paste not found";
                 auto resp = HttpResponse::newHttpJsonResponse(ret);
@@ -550,10 +661,11 @@ void PasteController::deletePaste(
             }
             const auto &row = result[0];
 
-            // Require password for protected pastes
+            // Require password for protected pastes with brute-force protection
             if (!row["password_hash"].isNull() && !row["password_hash"].as<std::string>().empty()) {
                 std::string providedPw = sharedReq->getHeader("X-Password");
                 if (!checkPassword(row, providedPw)) {
+                    recordAuthFailure(*clientIp);
                     Json::Value ret;
                     ret["error"] = "Password required to delete this paste";
                     ret["password_required"] = true;
@@ -561,6 +673,7 @@ void PasteController::deletePaste(
                     resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
                     (*sharedCallback)(resp); return;
                 }
+                clearAuthFailures(*clientIp);
             }
 
             db->execSqlAsync(
@@ -584,4 +697,34 @@ void PasteController::deletePaste(
             resp->setStatusCode(k500InternalServerError); addSecurityHeaders(resp);
             (*sharedCallback)(resp);
         }, id);
+}
+
+// ─── HEALTH CHECK ───────────────────────────────────────────────────────────
+void PasteController::healthCheck(
+    const HttpRequestPtr &req,
+    std::function<void(const HttpResponsePtr &)> &&callback) {
+
+    auto db = app().getDbClient();
+    auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
+
+    db->execSqlAsync(
+        "SELECT COUNT(*) as count FROM pastes",
+        [sharedCallback](const Result &result) {
+            Json::Value ret;
+            ret["status"] = "ok";
+            ret["db"] = "connected";
+            ret["paste_count"] = result[0]["count"].as<int64_t>();
+            auto resp = HttpResponse::newHttpJsonResponse(ret);
+            addSecurityHeaders(resp);
+            (*sharedCallback)(resp);
+        },
+        [sharedCallback](const DrogonDbException &) {
+            Json::Value ret;
+            ret["status"] = "error";
+            ret["db"] = "disconnected";
+            auto resp = HttpResponse::newHttpJsonResponse(ret);
+            resp->setStatusCode(k503ServiceUnavailable);
+            addSecurityHeaders(resp);
+            (*sharedCallback)(resp);
+        });
 }

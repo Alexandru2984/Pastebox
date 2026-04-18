@@ -14,6 +14,7 @@ public:
     ADD_METHOD_TO(PasteController::deletePaste, "/api/pastes/{id}", Delete);
     ADD_METHOD_TO(PasteController::getRawPaste, "/api/pastes/{id}/raw", Get);
     ADD_METHOD_TO(PasteController::forkPaste, "/api/pastes/{id}/fork", Post);
+    ADD_METHOD_TO(PasteController::healthCheck, "/api/health", Get);
     METHOD_LIST_END
 
     void createPaste(const HttpRequestPtr &req,
@@ -32,6 +33,8 @@ public:
     void forkPaste(const HttpRequestPtr &req,
                    std::function<void(const HttpResponsePtr &)> &&callback,
                    const std::string &id);
+    void healthCheck(const HttpRequestPtr &req,
+                     std::function<void(const HttpResponsePtr &)> &&callback);
 
 private:
     static std::string generateId(int length = 8);

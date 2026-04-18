@@ -322,8 +322,54 @@ yellow "▸ Security: CORS"
 RESP=$(curl -sI -X OPTIONS "$BASE/api/pastes")
 assert_contains "OPTIONS returns CORS headers" "access-control-allow" "$(echo "$RESP" | tr '[:upper:]' '[:lower:]')"
 
+# ─── Test 24: CSP header present ───
+delay
+yellow "▸ Security: Content-Security-Policy"
+RESP=$(curl -sI "$BASE/api/pastes")
+assert_contains "CSP header present" "content-security-policy" "$(echo "$RESP" | tr '[:upper:]' '[:lower:]')"
+
+# ─── Test 25: HSTS header present ───
+assert_contains "HSTS header present" "strict-transport-security" "$(echo "$RESP" | tr '[:upper:]' '[:lower:]')"
+
+# ─── Test 26: Permissions-Policy header present ───
+assert_contains "Permissions-Policy header present" "permissions-policy" "$(echo "$RESP" | tr '[:upper:]' '[:lower:]')"
+
+# ─── Test 27: CORS origin is restricted ───
+CORS_ORIGIN=$(echo "$RESP" | grep -i "access-control-allow-origin" | head -1)
+assert_contains "CORS origin is restricted (not wildcard)" "pastebox.micutu.com" "$CORS_ORIGIN"
+
+# ─── Test 28: X-XSS-Protection header ───
+assert_contains "X-XSS-Protection header present" "x-xss-protection" "$(echo "$RESP" | tr '[:upper:]' '[:lower:]')"
+
+# ─── Test 29: Health endpoint ───
+delay
+yellow "▸ Health endpoint"
+RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/health")
+CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | head -1)
+assert "Health endpoint returns 200" "200" "$CODE"
+assert_contains "Health says status ok" "ok" "$BODY"
+assert_contains "Health reports DB connected" "connected" "$BODY"
+
+# ─── Test 30: Brute-force protection ───
+delay
+yellow "▸ Security: Brute-force protection"
+# Create a password-protected paste for brute-force test
+BF_RESP=$(curl -s -X POST "$BASE/api/pastes" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"BruteForceTest","content":"secret data","language":"plaintext","visibility":"public","password":"correctpw"}')
+BF_ID=$(echo "$BF_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null)
+# Send 6 wrong passwords (limit is 5)
+for i in $(seq 1 6); do
+  curl -s "$BASE/api/pastes/$BF_ID" -H "X-Password: wrong$i" > /dev/null
+done
+# Next request should be locked out (429)
+RESP=$(curl -s -w "\n%{http_code}" "$BASE/api/pastes/$BF_ID" -H 'X-Password: correctpw')
+CODE=$(echo "$RESP" | tail -1)
+assert "Brute-force lockout after 5 failures" "429" "$CODE"
+
 # ─── Cleanup test pastes ───
-for id in $TAG_ID $PW_ID $UNL_ID $FORK_ID $EXP_ID $LIMIT_ID $TAG_LIMIT_ID $PRIV_ID $SALT1_ID $SALT2_ID; do
+for id in $TAG_ID $PW_ID $UNL_ID $FORK_ID $EXP_ID $LIMIT_ID $TAG_LIMIT_ID $PRIV_ID $SALT1_ID $SALT2_ID $BF_ID; do
   curl -s -X DELETE "$BASE/api/pastes/$id" > /dev/null 2>&1
 done
 
