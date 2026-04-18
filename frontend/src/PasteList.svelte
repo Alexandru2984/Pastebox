@@ -8,13 +8,18 @@
   let loading = true;
   let error = '';
   let filterTag = '';
+  let page = 1;
+  let hasMore = false;
 
   onMount(() => loadPastes());
 
-  async function loadPastes(tag = '') {
+  async function loadPastes(tag = '', p = 1) {
     loading = true;
     try {
-      pastes = await listPastes(tag);
+      const result = await listPastes(tag, p);
+      pastes = result.data || result;
+      page = result.page || p;
+      hasMore = result.has_more || false;
       filterTag = tag;
     } catch (e) {
       error = 'Failed to load pastes';
@@ -22,6 +27,9 @@
       loading = false;
     }
   }
+
+  function nextPage() { loadPastes(filterTag, page + 1); }
+  function prevPage() { if (page > 1) loadPastes(filterTag, page - 1); }
 
   function formatDate(dateStr) {
     const d = new Date(dateStr + 'Z');
@@ -47,77 +55,97 @@
   };
 </script>
 
-<div class="space-y-5">
+<section class="space-y-5" aria-label="Paste list">
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
     <h2 class="text-2xl font-semibold text-[var(--text-primary)]">
       {filterTag ? `Pastes tagged #${filterTag}` : 'Recent Pastes'}
     </h2>
     {#if filterTag}
       <button on:click={() => loadPastes('')}
-        class="text-sm text-[var(--accent)] hover:underline bg-transparent border-none cursor-pointer">
+        class="text-sm text-[var(--accent)] hover:underline bg-transparent border-none cursor-pointer"
+        aria-label="Clear tag filter">
         ← All pastes
       </button>
     {/if}
   </div>
 
   {#if loading}
-    <div class="flex justify-center py-12">
+    <div class="flex justify-center py-12" role="status" aria-live="polite">
       <div class="text-[var(--text-secondary)]">Loading...</div>
     </div>
   {:else if error}
-    <div class="text-[var(--red)] py-8 text-center">{error}</div>
+    <div class="text-[var(--red)] py-8 text-center" role="alert">{error}</div>
   {:else if pastes.length === 0}
     <div class="flex flex-col items-center py-16 gap-4 text-[var(--text-secondary)]">
-      <div class="text-5xl">📝</div>
+      <div class="text-5xl" aria-hidden="true">📝</div>
       <p>No pastes yet. Create the first one!</p>
     </div>
   {:else}
-    <div class="space-y-2">
+    <ul class="space-y-2 list-none p-0 m-0" role="list" aria-label="Pastes">
       {#each pastes as paste}
-        <button
-          on:click={() => dispatch('view', paste.id)}
-          class="w-full text-left bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-4
-            hover:border-[var(--accent)] transition-colors cursor-pointer group"
-        >
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div class="flex items-center gap-3 min-w-0">
-              <span class="w-3 h-3 rounded-full inline-block shrink-0"
-                style="background-color: {langColors[paste.language] || '#8b949e'}"></span>
-              <span class="font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors truncate">
-                {paste.title}
-              </span>
-              <span class="text-xs font-mono px-2 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] shrink-0">
-                {paste.language}
-              </span>
-              {#if paste.burn_after_read}
-                <span class="text-xs" title="Burns after reading">🔥</span>
-              {/if}
-              {#if paste.has_password}
-                <span class="text-xs" title="Password protected">🔑</span>
-              {/if}
-              {#if paste.expires_at}
-                <span class="text-xs" title="Has expiration">⏰</span>
-              {/if}
+        <li>
+          <button
+            on:click={() => dispatch('view', paste.id)}
+            class="w-full text-left bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-4
+              hover:border-[var(--accent)] transition-colors cursor-pointer group"
+            aria-label="View paste: {paste.title}"
+          >
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div class="flex items-center gap-3 min-w-0">
+                <span class="w-3 h-3 rounded-full inline-block shrink-0" aria-hidden="true"
+                  style="background-color: {langColors[paste.language] || '#8b949e'}"></span>
+                <span class="font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors truncate">
+                  {paste.title}
+                </span>
+                <span class="text-xs font-mono px-2 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] shrink-0">
+                  {paste.language}
+                </span>
+                {#if paste.burn_after_read}
+                  <span class="text-xs" title="Burns after reading" aria-label="Burns after reading">🔥</span>
+                {/if}
+                {#if paste.has_password}
+                  <span class="text-xs" title="Password protected" aria-label="Password protected">🔑</span>
+                {/if}
+                {#if paste.expires_at}
+                  <span class="text-xs" title="Has expiration" aria-label="Has expiration">⏰</span>
+                {/if}
+              </div>
+              <div class="flex items-center gap-3 text-xs text-[var(--text-secondary)] shrink-0">
+                <span>{paste.views} views</span>
+                <span>{formatSize(paste.size)}</span>
+                <span>{formatDate(paste.created_at)}</span>
+              </div>
             </div>
-            <div class="flex items-center gap-3 text-xs text-[var(--text-secondary)] shrink-0">
-              <span>{paste.views} views</span>
-              <span>{formatSize(paste.size)}</span>
-              <span>{formatDate(paste.created_at)}</span>
-            </div>
-          </div>
-          {#if paste.tags && paste.tags.length > 0}
-            <div class="flex gap-1.5 mt-2">
-              {#each paste.tags as tag}
-                <button
-                  on:click|stopPropagation={() => loadPastes(tag)}
-                  class="text-xs px-2 py-0.5 rounded-full bg-[var(--accent)]/10 text-[var(--accent)]
-                    hover:bg-[var(--accent)]/20 cursor-pointer border-none"
-                >#{tag}</button>
-              {/each}
-            </div>
-          {/if}
-        </button>
+            {#if paste.tags && paste.tags.length > 0}
+              <div class="flex gap-1.5 mt-2">
+                {#each paste.tags as tag}
+                  <button
+                    on:click|stopPropagation={() => loadPastes(tag)}
+                    class="text-xs px-2 py-0.5 rounded-full bg-[var(--accent)]/10 text-[var(--accent)]
+                      hover:bg-[var(--accent)]/20 cursor-pointer border-none"
+                    aria-label="Filter by tag {tag}"
+                  >#{tag}</button>
+                {/each}
+              </div>
+            {/if}
+          </button>
+        </li>
       {/each}
-    </div>
+    </ul>
+
+    <!-- Pagination -->
+    <nav class="flex items-center justify-center gap-4 pt-2" aria-label="Pagination">
+      <button on:click={prevPage} disabled={page <= 1}
+        class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg text-sm
+          text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors cursor-pointer
+          disabled:opacity-40 disabled:cursor-not-allowed"
+        aria-label="Previous page">← Prev</button>
+      <span class="text-sm text-[var(--text-secondary)]" aria-current="page">Page {page}</span>
+      <button on:click={nextPage} disabled={!hasMore}
+        class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg text-sm
+          text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors cursor-pointer
+          disabled:opacity-40 disabled:cursor-not-allowed"
+        aria-label="Next page">Next →</button>
+    </nav>
   {/if}
-</div>
+</section>

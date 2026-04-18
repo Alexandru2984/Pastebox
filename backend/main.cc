@@ -143,8 +143,8 @@ int main() {
             if (req->method() == drogon::Options) {
                 auto resp = drogon::HttpResponse::newHttpResponse();
                 resp->addHeader("Access-Control-Allow-Origin", "https://pastebox.micutu.com");
-                resp->addHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-                resp->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password");
+                resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+                resp->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password, X-Requested-With");
                 resp->addHeader("Access-Control-Max-Age", "86400");
                 resp->addHeader("X-Content-Type-Options", "nosniff");
                 resp->addHeader("X-Frame-Options", "DENY");

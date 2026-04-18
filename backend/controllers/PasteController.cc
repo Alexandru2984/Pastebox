@@ -2,6 +2,7 @@
 #include <drogon/orm/DbClient.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
+#include <openssl/crypto.h>
 #include <sstream>
 #include <iomanip>
 #include <mutex>
@@ -16,6 +17,8 @@ static constexpr size_t MAX_TITLE_LENGTH = 200;
 static constexpr size_t MAX_TAG_LENGTH = 50;
 static constexpr size_t MAX_TAGS_COUNT = 10;
 static constexpr size_t MAX_LANGUAGE_LENGTH = 30;
+static constexpr size_t MIN_PASSWORD_LENGTH = 4;
+static constexpr size_t MAX_PASSWORD_LENGTH = 256;
 
 // Brute-force protection: track failed password attempts per IP
 struct AuthAttempt {
@@ -75,8 +78,8 @@ std::string PasteController::generateId(int length) {
 
 void PasteController::addCorsHeaders(const HttpResponsePtr &resp) {
     resp->addHeader("Access-Control-Allow-Origin", "https://pastebox.micutu.com");
-    resp->addHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    resp->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password");
+    resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    resp->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password, X-Requested-With");
     resp->addHeader("Vary", "Origin");
 }
 
@@ -137,10 +140,15 @@ bool PasteController::checkPassword(const Row &row, const std::string &password)
     if (colonPos != std::string::npos) {
         std::string salt = stored.substr(0, colonPos);
         std::string expectedHash = stored.substr(colonPos + 1);
-        return sha256Hash(salt + password) == expectedHash;
+        std::string computed = sha256Hash(salt + password);
+        // Constant-time comparison to prevent timing attacks
+        if (computed.size() != expectedHash.size()) return false;
+        return CRYPTO_memcmp(computed.data(), expectedHash.data(), computed.size()) == 0;
     }
-    // Fallback: legacy unsalted hash (for existing pastes)
-    return sha256Hash(password) == stored;
+    // Fallback: legacy unsalted hash
+    std::string computed = sha256Hash(password);
+    if (computed.size() != stored.size()) return false;
+    return CRYPTO_memcmp(computed.data(), stored.data(), computed.size()) == 0;
 }
 
 Json::Value PasteController::pasteRowToJson(const Row &row, bool includeContent) {
@@ -171,6 +179,14 @@ void PasteController::createPaste(
     const HttpRequestPtr &req,
     std::function<void(const HttpResponsePtr &)> &&callback) {
 
+    // CSRF protection: require custom header on state-changing requests
+    if (req->getHeader("X-Requested-With").empty()) {
+        Json::Value ret; ret["error"] = "Missing required header";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
+        callback(resp); return;
+    }
+
     auto json = req->getJsonObject();
     if (!json) {
         Json::Value ret; ret["error"] = "Invalid JSON body";
@@ -193,6 +209,21 @@ void PasteController::createPaste(
         callback(resp); return;
     }
 
+    std::string password = (*json).get("password", "").asString();
+    // Validate password length
+    if (!password.empty() && password.size() < MIN_PASSWORD_LENGTH) {
+        Json::Value ret; ret["error"] = "Password must be at least 4 characters";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k400BadRequest); addSecurityHeaders(resp);
+        callback(resp); return;
+    }
+    if (password.size() > MAX_PASSWORD_LENGTH) {
+        Json::Value ret; ret["error"] = "Password too long (max 256 characters)";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k400BadRequest); addSecurityHeaders(resp);
+        callback(resp); return;
+    }
+
     std::string id = generateId();
     std::string title = (*json).get("title", "Untitled").asString();
     if (title.size() > MAX_TITLE_LENGTH) title = title.substr(0, MAX_TITLE_LENGTH);
@@ -202,7 +233,6 @@ void PasteController::createPaste(
 
     std::string visibility = (*json).get("visibility", "public").asString();
     bool burnAfterRead = (*json).get("burn_after_read", false).asBool();
-    std::string password = (*json).get("password", "").asString();
     std::string expiresIn = (*json).get("expires_in", "").asString();
     std::string parentId = (*json).get("parent_id", "").asString();
 
@@ -287,49 +317,43 @@ void PasteController::listPastes(
     std::string tag = req->getParameter("tag");
     auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
 
+    // Pagination
+    int page = 1, limit = 50;
+    try {
+        auto p = req->getParameter("page");
+        auto l = req->getParameter("limit");
+        if (!p.empty()) page = std::max(1, std::stoi(p));
+        if (!l.empty()) limit = std::max(1, std::min(100, std::stoi(l)));
+    } catch (...) {}
+    int offset = (page - 1) * limit;
+
+    // Single query with GROUP_CONCAT to avoid N+1 tag fetching
     std::string sql;
     if (tag.empty()) {
-        sql = "SELECT id, title, language, created_at, length(content) as size, "
-              "visibility, burn_after_read, password_hash, expires_at, views "
-              "FROM pastes WHERE visibility = 'public' "
-              "AND (expires_at IS NULL OR expires_at > datetime('now')) "
-              "ORDER BY created_at DESC LIMIT 50";
-    } else {
         sql = "SELECT p.id, p.title, p.language, p.created_at, length(p.content) as size, "
-              "p.visibility, p.burn_after_read, p.password_hash, p.expires_at, p.views "
-              "FROM pastes p JOIN tags t ON p.id = t.paste_id "
+              "p.visibility, p.burn_after_read, p.password_hash, p.expires_at, p.views, "
+              "GROUP_CONCAT(t.tag) as tag_list "
+              "FROM pastes p LEFT JOIN tags t ON p.id = t.paste_id "
               "WHERE p.visibility = 'public' "
               "AND (p.expires_at IS NULL OR p.expires_at > datetime('now')) "
-              "AND t.tag = ? "
-              "ORDER BY p.created_at DESC LIMIT 50";
+              "GROUP BY p.id ORDER BY p.created_at DESC LIMIT ? OFFSET ?";
+    } else {
+        sql = "SELECT p.id, p.title, p.language, p.created_at, length(p.content) as size, "
+              "p.visibility, p.burn_after_read, p.password_hash, p.expires_at, p.views, "
+              "GROUP_CONCAT(t2.tag) as tag_list "
+              "FROM pastes p "
+              "JOIN tags t ON p.id = t.paste_id AND t.tag = ? "
+              "LEFT JOIN tags t2 ON p.id = t2.paste_id "
+              "WHERE p.visibility = 'public' "
+              "AND (p.expires_at IS NULL OR p.expires_at > datetime('now')) "
+              "GROUP BY p.id ORDER BY p.created_at DESC LIMIT ? OFFSET ?";
     }
 
-    auto fetchTags = [](const std::shared_ptr<DbClient> &db, const std::string &pid,
-                        std::function<void(Json::Value)> cb) {
-        db->execSqlAsync(
-            "SELECT tag FROM tags WHERE paste_id = ?",
-            [cb](const Result &r) {
-                Json::Value tags(Json::arrayValue);
-                for (const auto &row : r) tags.append(row["tag"].as<std::string>());
-                cb(tags);
-            },
-            [cb](const DrogonDbException &) { cb(Json::Value(Json::arrayValue)); },
-            pid);
-    };
+    auto handleResult = [sharedCallback, page, limit](const Result &result) {
+        Json::Value response;
+        Json::Value pastes(Json::arrayValue);
 
-    auto handleResult = [sharedCallback, db, fetchTags](const Result &result) {
-        if (result.empty()) {
-            auto resp = HttpResponse::newHttpJsonResponse(Json::Value(Json::arrayValue));
-            addSecurityHeaders(resp);
-            (*sharedCallback)(resp);
-            return;
-        }
-
-        auto pastes = std::make_shared<Json::Value>(Json::arrayValue);
-        auto remaining = std::make_shared<int>(result.size());
-
-        for (size_t i = 0; i < result.size(); i++) {
-            const auto &row = result[i];
+        for (const auto &row : result) {
             Json::Value paste;
             paste["id"] = row["id"].as<std::string>();
             paste["title"] = row["title"].as<std::string>();
@@ -345,38 +369,41 @@ void PasteController::listPastes(
             else
                 paste["expires_at"] = Json::nullValue;
 
-            auto idx = std::make_shared<size_t>(i);
-            auto pastePtr = std::make_shared<Json::Value>(paste);
-
-            fetchTags(db, paste["id"].asString(), [pastes, remaining, sharedCallback, pastePtr, idx](Json::Value tags) {
-                (*pastePtr)["tags"] = tags;
-                (*pastes).append(*pastePtr);
-                (*remaining)--;
-                if (*remaining == 0) {
-                    auto resp = HttpResponse::newHttpJsonResponse(*pastes);
-                    addSecurityHeaders(resp);
-                    (*sharedCallback)(resp);
+            // Parse GROUP_CONCAT tags
+            Json::Value tags(Json::arrayValue);
+            if (!row["tag_list"].isNull()) {
+                std::string tagStr = row["tag_list"].as<std::string>();
+                std::istringstream ss(tagStr);
+                std::string t;
+                while (std::getline(ss, t, ',')) {
+                    if (!t.empty()) tags.append(t);
                 }
-            });
+            }
+            paste["tags"] = tags;
+            pastes.append(paste);
         }
+
+        response["data"] = pastes;
+        response["page"] = page;
+        response["limit"] = limit;
+        response["count"] = static_cast<int>(result.size());
+        response["has_more"] = static_cast<int>(result.size()) == limit;
+        auto resp = HttpResponse::newHttpJsonResponse(response);
+        addSecurityHeaders(resp);
+        (*sharedCallback)(resp);
+    };
+
+    auto errorHandler = [sharedCallback](const DrogonDbException &e) {
+        Json::Value ret; ret["error"] = "Internal server error";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k500InternalServerError); addSecurityHeaders(resp);
+        (*sharedCallback)(resp);
     };
 
     if (tag.empty()) {
-        db->execSqlAsync(sql, handleResult,
-            [sharedCallback](const DrogonDbException &e) {
-                Json::Value ret; ret["error"] = "Internal server error";
-                auto resp = HttpResponse::newHttpJsonResponse(ret);
-                resp->setStatusCode(k500InternalServerError); addSecurityHeaders(resp);
-                (*sharedCallback)(resp);
-            });
+        db->execSqlAsync(sql, handleResult, errorHandler, limit, offset);
     } else {
-        db->execSqlAsync(sql, handleResult,
-            [sharedCallback](const DrogonDbException &e) {
-                Json::Value ret; ret["error"] = "Internal server error";
-                auto resp = HttpResponse::newHttpJsonResponse(ret);
-                resp->setStatusCode(k500InternalServerError); addSecurityHeaders(resp);
-                (*sharedCallback)(resp);
-            }, tag);
+        db->execSqlAsync(sql, handleResult, errorHandler, tag, limit, offset);
     }
 }
 
@@ -420,10 +447,11 @@ void PasteController::getPaste(
                 if (!checkPassword(row, providedPw)) {
                     recordAuthFailure(*clientIp);
                     Json::Value ret;
-                    ret["error"] = "Password required";
+                    // Return 404 (not 403) to prevent paste ID enumeration
+                    ret["error"] = "Paste not found";
                     ret["password_required"] = true;
                     auto resp = HttpResponse::newHttpJsonResponse(ret);
-                    resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
+                    resp->setStatusCode(k404NotFound); addSecurityHeaders(resp);
                     (*sharedCallback)(resp); return;
                 }
                 clearAuthFailures(*clientIp);
@@ -454,6 +482,15 @@ void PasteController::getPaste(
                     }
 
                     auto resp = HttpResponse::newHttpJsonResponse(paste);
+                    // ETag for caching (based on paste ID + views count)
+                    if (!isBurn) {
+                        std::string etag = "\"" + paste["id"].asString() + "-" +
+                                          std::to_string(paste["views"].asInt64()) + "\"";
+                        resp->addHeader("ETag", etag);
+                        resp->addHeader("Cache-Control", "private, no-cache");
+                    } else {
+                        resp->addHeader("Cache-Control", "no-store");
+                    }
                     addSecurityHeaders(resp);
                     (*sharedCallback)(resp);
                 },
@@ -513,9 +550,9 @@ void PasteController::getRawPaste(
                 if (!checkPassword(row, providedPw)) {
                     recordAuthFailure(*clientIp);
                     auto resp = HttpResponse::newHttpResponse();
-                    resp->setStatusCode(k403Forbidden);
+                    resp->setStatusCode(k404NotFound);
                     resp->setContentTypeString("text/plain");
-                    resp->setBody("Password required");
+                    resp->setBody("Paste not found");
                     addSecurityHeaders(resp);
                     (*sharedCallback)(resp); return;
                 }
@@ -525,6 +562,7 @@ void PasteController::getRawPaste(
             auto resp = HttpResponse::newHttpResponse();
             resp->setContentTypeString("text/plain; charset=utf-8");
             resp->setBody(row["content"].as<std::string>());
+            resp->addHeader("Content-Disposition", "inline");
             addSecurityHeaders(resp);
             (*sharedCallback)(resp);
         },
@@ -543,6 +581,14 @@ void PasteController::forkPaste(
     const HttpRequestPtr &req,
     std::function<void(const HttpResponsePtr &)> &&callback,
     const std::string &id) {
+
+    // CSRF protection
+    if (req->getHeader("X-Requested-With").empty()) {
+        Json::Value ret; ret["error"] = "Missing required header";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
+        callback(resp); return;
+    }
 
     auto db = app().getDbClient();
     auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
@@ -633,6 +679,14 @@ void PasteController::deletePaste(
     std::function<void(const HttpResponsePtr &)> &&callback,
     const std::string &id) {
 
+    // CSRF protection
+    if (req->getHeader("X-Requested-With").empty()) {
+        Json::Value ret; ret["error"] = "Missing required header";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
+        callback(resp); return;
+    }
+
     auto db = app().getDbClient();
     auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
     auto sharedReq = req;
@@ -692,6 +746,173 @@ void PasteController::deletePaste(
                 }, id);
         },
         [sharedCallback](const DrogonDbException &) {
+            Json::Value ret; ret["error"] = "Internal server error";
+            auto resp = HttpResponse::newHttpJsonResponse(ret);
+            resp->setStatusCode(k500InternalServerError); addSecurityHeaders(resp);
+            (*sharedCallback)(resp);
+        }, id);
+}
+
+// ─── UPDATE ─────────────────────────────────────────────────────────────────
+void PasteController::updatePaste(
+    const HttpRequestPtr &req,
+    std::function<void(const HttpResponsePtr &)> &&callback,
+    const std::string &id) {
+
+    // CSRF protection
+    if (req->getHeader("X-Requested-With").empty()) {
+        Json::Value ret; ret["error"] = "Missing required header";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k403Forbidden); addSecurityHeaders(resp);
+        callback(resp); return;
+    }
+
+    auto json = req->getJsonObject();
+    if (!json) {
+        Json::Value ret; ret["error"] = "Invalid JSON body";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k400BadRequest); addSecurityHeaders(resp);
+        callback(resp); return;
+    }
+
+    auto db = app().getDbClient();
+    auto sharedCallback = std::make_shared<std::function<void(const HttpResponsePtr &)>>(std::move(callback));
+    auto sharedReq = req;
+    auto sharedJson = json;
+
+    auto clientIp = std::make_shared<std::string>(req->peerAddr().toIp());
+
+    if (isAuthLocked(*clientIp)) {
+        Json::Value ret; ret["error"] = "Too many failed attempts. Try again later.";
+        auto resp = HttpResponse::newHttpJsonResponse(ret);
+        resp->setStatusCode(k429TooManyRequests);
+        resp->addHeader("Retry-After", "300"); addSecurityHeaders(resp);
+        (*sharedCallback)(resp); return;
+    }
+
+    db->execSqlAsync(
+        "SELECT * FROM pastes WHERE id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))",
+        [sharedCallback, sharedReq, sharedJson, db, id, clientIp](const Result &result) {
+            if (result.empty()) {
+                Json::Value ret; ret["error"] = "Paste not found";
+                auto resp = HttpResponse::newHttpJsonResponse(ret);
+                resp->setStatusCode(k404NotFound); addSecurityHeaders(resp);
+                (*sharedCallback)(resp); return;
+            }
+            const auto &row = result[0];
+
+            // Require password for protected pastes
+            if (!row["password_hash"].isNull() && !row["password_hash"].as<std::string>().empty()) {
+                std::string providedPw = sharedReq->getHeader("X-Password");
+                if (!checkPassword(row, providedPw)) {
+                    recordAuthFailure(*clientIp);
+                    Json::Value ret; ret["error"] = "Paste not found"; ret["password_required"] = true;
+                    auto resp = HttpResponse::newHttpJsonResponse(ret);
+                    resp->setStatusCode(k404NotFound); addSecurityHeaders(resp);
+                    (*sharedCallback)(resp); return;
+                }
+                clearAuthFailures(*clientIp);
+            }
+
+            // Build update SQL dynamically
+            std::string title = row["title"].as<std::string>();
+            std::string content = row["content"].as<std::string>();
+            std::string language = row["language"].as<std::string>();
+            std::string visibility = row["visibility"].isNull() ? "public" : row["visibility"].as<std::string>();
+
+            if (sharedJson->isMember("title")) {
+                title = (*sharedJson)["title"].asString();
+                if (title.size() > MAX_TITLE_LENGTH) title = title.substr(0, MAX_TITLE_LENGTH);
+            }
+            if (sharedJson->isMember("content")) {
+                content = (*sharedJson)["content"].asString();
+                if (content.empty()) {
+                    Json::Value ret; ret["error"] = "Content cannot be empty";
+                    auto resp = HttpResponse::newHttpJsonResponse(ret);
+                    resp->setStatusCode(k400BadRequest); addSecurityHeaders(resp);
+                    (*sharedCallback)(resp); return;
+                }
+                if (content.size() > MAX_PASTE_SIZE) {
+                    Json::Value ret; ret["error"] = "Paste too large. Max size is 512KB.";
+                    auto resp = HttpResponse::newHttpJsonResponse(ret);
+                    resp->setStatusCode(k413RequestEntityTooLarge); addSecurityHeaders(resp);
+                    (*sharedCallback)(resp); return;
+                }
+            }
+            if (sharedJson->isMember("language")) {
+                language = (*sharedJson)["language"].asString();
+                if (language.size() > MAX_LANGUAGE_LENGTH) language = "plaintext";
+            }
+            if (sharedJson->isMember("visibility")) {
+                std::string v = (*sharedJson)["visibility"].asString();
+                if (v == "public" || v == "unlisted" || v == "private") visibility = v;
+            }
+
+            db->execSqlAsync(
+                "UPDATE pastes SET title = ?, content = ?, language = ?, visibility = ? WHERE id = ?",
+                [sharedCallback, sharedJson, db, id, title, content, language, visibility](const Result &) {
+                    // Handle tags update if provided
+                    if (sharedJson->isMember("tags") && (*sharedJson)["tags"].isArray()) {
+                        db->execSqlAsync("DELETE FROM tags WHERE paste_id = ?",
+                            [sharedCallback, sharedJson, db, id, title, content, language, visibility](const Result &) {
+                                auto newTags = (*sharedJson)["tags"];
+                                auto remaining = std::make_shared<int>(newTags.size());
+                                if (newTags.empty()) {
+                                    Json::Value ret;
+                                    ret["id"] = id; ret["title"] = title; ret["language"] = language;
+                                    ret["visibility"] = visibility; ret["message"] = "Paste updated";
+                                    auto resp = HttpResponse::newHttpJsonResponse(ret);
+                                    addSecurityHeaders(resp);
+                                    (*sharedCallback)(resp);
+                                    return;
+                                }
+                                int tagCount = 0;
+                                for (const auto &tag : newTags) {
+                                    if (tagCount >= static_cast<int>(MAX_TAGS_COUNT)) break;
+                                    std::string t = tag.asString();
+                                    if (t.empty() || t.size() > MAX_TAG_LENGTH) { (*remaining)--; continue; }
+                                    tagCount++;
+                                    db->execSqlAsync("INSERT INTO tags (paste_id, tag) VALUES (?, ?)",
+                                        [remaining, sharedCallback, id, title, language, visibility](const Result &) {
+                                            (*remaining)--;
+                                            if (*remaining <= 0) {
+                                                Json::Value ret;
+                                                ret["id"] = id; ret["title"] = title; ret["language"] = language;
+                                                ret["visibility"] = visibility; ret["message"] = "Paste updated";
+                                                auto resp = HttpResponse::newHttpJsonResponse(ret);
+                                                addSecurityHeaders(resp);
+                                                (*sharedCallback)(resp);
+                                            }
+                                        },
+                                        [remaining, sharedCallback](const DrogonDbException &) {
+                                            (*remaining)--;
+                                        }, id, t);
+                                }
+                            },
+                            [sharedCallback](const DrogonDbException &) {
+                                Json::Value ret; ret["error"] = "Database error";
+                                auto resp = HttpResponse::newHttpJsonResponse(ret);
+                                resp->setStatusCode(k500InternalServerError); addSecurityHeaders(resp);
+                                (*sharedCallback)(resp);
+                            }, id);
+                    } else {
+                        Json::Value ret;
+                        ret["id"] = id; ret["title"] = title; ret["language"] = language;
+                        ret["visibility"] = visibility; ret["message"] = "Paste updated";
+                        auto resp = HttpResponse::newHttpJsonResponse(ret);
+                        addSecurityHeaders(resp);
+                        (*sharedCallback)(resp);
+                    }
+                },
+                [sharedCallback](const DrogonDbException &e) {
+                    Json::Value ret; ret["error"] = "Internal server error";
+                    auto resp = HttpResponse::newHttpJsonResponse(ret);
+                    resp->setStatusCode(k500InternalServerError); addSecurityHeaders(resp);
+                    (*sharedCallback)(resp);
+                },
+                title, content, language, visibility, id);
+        },
+        [sharedCallback](const DrogonDbException &e) {
             Json::Value ret; ret["error"] = "Internal server error";
             auto resp = HttpResponse::newHttpJsonResponse(ret);
             resp->setStatusCode(k500InternalServerError); addSecurityHeaders(resp);

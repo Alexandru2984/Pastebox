@@ -11,6 +11,7 @@ public:
     ADD_METHOD_TO(PasteController::createPaste, "/api/pastes", Post);
     ADD_METHOD_TO(PasteController::listPastes, "/api/pastes", Get);
     ADD_METHOD_TO(PasteController::getPaste, "/api/pastes/{id}", Get);
+    ADD_METHOD_TO(PasteController::updatePaste, "/api/pastes/{id}", Put);
     ADD_METHOD_TO(PasteController::deletePaste, "/api/pastes/{id}", Delete);
     ADD_METHOD_TO(PasteController::getRawPaste, "/api/pastes/{id}/raw", Get);
     ADD_METHOD_TO(PasteController::forkPaste, "/api/pastes/{id}/fork", Post);
@@ -24,6 +25,9 @@ public:
     void getPaste(const HttpRequestPtr &req,
                   std::function<void(const HttpResponsePtr &)> &&callback,
                   const std::string &id);
+    void updatePaste(const HttpRequestPtr &req,
+                     std::function<void(const HttpResponsePtr &)> &&callback,
+                     const std::string &id);
     void deletePaste(const HttpRequestPtr &req,
                      std::function<void(const HttpResponsePtr &)> &&callback,
                      const std::string &id);
