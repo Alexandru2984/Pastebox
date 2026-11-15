@@ -22,7 +22,7 @@
     "svelte": "^5.55.1",
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.4",
-    "vitest": "^4.1.4"
+    "vitest": "^5.1.0"
   },
   "dependencies": {
     "dompurify": "^3.4.18",
