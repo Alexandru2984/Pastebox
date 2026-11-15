@@ -1,143 +1,72 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import CreatePaste from './CreatePaste.svelte';
   import PasteView from './PasteView.svelte';
   import PasteList from './PasteList.svelte';
+  import Library from './Library.svelte';
   import EmbedView from './EmbedView.svelte';
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import Toast from './Toast.svelte';
+  import Icon from './Icon.svelte';
   import { initTheme } from './lib/themes.js';
-
   let currentView = 'create';
   let currentId = '';
+  let shortcuts;
 
   function parseHash() {
-    const hash = window.location.hash || '#/';
-    if (hash.startsWith('#/paste/')) {
-      currentView = 'view';
-      currentId = hash.replace('#/paste/', '');
-    } else if (hash.startsWith('#/embed/')) {
-      currentView = 'embed';
-      currentId = hash.replace('#/embed/', '');
-    } else if (hash === '#/list') {
-      currentView = 'list';
-      currentId = '';
-    } else {
-      currentView = 'create';
-      currentId = '';
-    }
+    const hash = window.location.hash;
+    const match = hash.match(/^#\/(paste|embed)\/([a-zA-Z0-9]{1,64})$/);
+    if (match) { currentView = match[1] === 'paste' ? 'view' : 'embed'; currentId = match[2]; }
+    else { currentView = hash === '#/list' ? 'list' : hash === '#/library' ? 'library' : 'create'; currentId = ''; }
+    document.title = ({ create: 'PasteBox — A home for your next snippet', list: 'Explore snippets · PasteBox', library: 'Your library · PasteBox', view: 'View paste · PasteBox', embed: 'Embedded paste · PasteBox' })[currentView];
+    window.scrollTo?.({ top: 0, behavior: 'instant' });
   }
-
   function navigate(view, id = '') {
-    if (view === 'view' && id) {
-      window.location.hash = `#/paste/${id}`;
-    } else if (view === 'embed' && id) {
-      window.location.hash = `#/embed/${id}`;
-    } else if (view === 'list') {
-      window.location.hash = '#/list';
-    } else {
-      window.location.hash = '#/';
-    }
+    window.location.hash = view === 'view' ? `#/paste/${id}` : view === 'list' ? '#/list' : view === 'library' ? '#/library' : '#/';
   }
-
-  function handleNav(e) {
-    const { view, id } = e.detail;
-    navigate(view, id);
+  function handleNav(event) { navigate(event.detail.view, event.detail.id); }
+  function handleKeydown(event) {
+    if (event.target.closest('input, textarea, select, [contenteditable="true"], dialog') || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === '?') { event.preventDefault(); shortcuts.showModal(); }
+    const view = { n:'create', l:'list', b:'library' }[event.key.toLowerCase()];
+    if (view) { event.preventDefault(); navigate(view); }
   }
-
-  function handleKeydown(e) {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-    if (e.key === 'n' && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      navigate('create');
-    } else if (e.key === 'l' && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      navigate('list');
-    }
-  }
-
   onMount(() => {
-    initTheme();
-    parseHash();
+    initTheme(); parseHash();
     window.addEventListener('hashchange', parseHash);
     window.addEventListener('keydown', handleKeydown);
-  });
-
-  onDestroy(() => {
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('hashchange', parseHash);
-      window.removeEventListener('keydown', handleKeydown);
-    }
+    return () => { window.removeEventListener('hashchange', parseHash); window.removeEventListener('keydown', handleKeydown); };
   });
 </script>
 
 {#if currentView === 'embed'}
-  <EmbedView pasteId={currentId} />
+  {#key currentId}<EmbedView pasteId={currentId} />{/key}
 {:else}
-  <div class="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
-    <!-- Skip to main content link for keyboard users -->
-    <a href="#main-content"
-      class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50
-        focus:px-4 focus:py-2 focus:bg-[var(--accent)] focus:text-[var(--bg-primary)] focus:rounded-lg">
-      Skip to main content
-    </a>
-
-    <!-- Header -->
-    <header class="border-b border-[var(--border)] bg-[var(--bg-secondary)]" role="banner">
-      <div class="max-w-5xl mx-auto flex items-center justify-between px-6 py-3.5">
-        <button on:click={() => navigate('create')}
-          class="flex items-center gap-2.5 bg-transparent border-none cursor-pointer p-0"
-          aria-label="PasteBox — go to home">
-          <span class="text-2xl" aria-hidden="true">📋</span>
-          <span class="text-xl font-bold text-[var(--text-primary)]">PasteBox</span>
-        </button>
-        <nav class="flex items-center gap-2" aria-label="Main navigation">
-          <button on:click={() => navigate('create')}
-            aria-current={currentView === 'create' ? 'page' : undefined}
-            class="px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer transition-colors
-              {currentView === 'create' ? 'bg-[var(--accent)] text-[var(--bg-primary)]' : 'bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}">
-            + New
-          </button>
-          <button on:click={() => navigate('list')}
-            aria-current={currentView === 'list' ? 'page' : undefined}
-            class="px-3 py-1.5 rounded-lg text-sm font-medium border-none cursor-pointer transition-colors
-              {currentView === 'list' ? 'bg-[var(--accent)] text-[var(--bg-primary)]' : 'bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}">
-            Browse
-          </button>
-          <div class="w-px h-5 bg-[var(--border)] mx-1" aria-hidden="true"></div>
-          <ThemeSwitcher />
+  <div class="app-shell">
+    <a class="skip-link" href="#main-content" on:click|preventDefault={() => document.getElementById('main-content').focus()}>Skip to main content</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a href="#/" class="brand" aria-label="PasteBox home"><span class="brand-mark"><Icon name="code" size={23}/></span><span>pastebox<span class="brand-dot">.</span></span></a>
+        <nav class="main-nav" aria-label="Main navigation">
+          <a href="#/" aria-current={currentView === 'create' ? 'page' : undefined}><Icon name="plus" size={16}/> New paste</a>
+          <a href="#/list" aria-current={currentView === 'list' ? 'page' : undefined}><Icon name="globe" size={16}/> Explore</a>
+          <a href="#/library" aria-current={currentView === 'library' ? 'page' : undefined}><Icon name="library" size={16}/> Library</a>
         </nav>
+        <div class="header-tools"><ThemeSwitcher /></div>
       </div>
     </header>
-
-    <!-- Main -->
-    <main id="main-content" class="max-w-5xl mx-auto px-6 py-6" role="main">
-      {#if currentView === 'create'}
-        <CreatePaste on:navigate={handleNav} />
-      {:else if currentView === 'view'}
-        {#key currentId}<PasteView pasteId={currentId} on:navigate={handleNav} />{/key}
-      {:else if currentView === 'list'}
-        <PasteList on:view={(e) => navigate('view', e.detail)} />
-      {/if}
+    <main id="main-content" class="main-container" tabindex="-1">
+      {#if currentView === 'create'}<CreatePaste on:navigate={handleNav}/>
+      {:else if currentView === 'view'}{#key currentId}<PasteView pasteId={currentId} on:navigate={handleNav}/>{/key}
+      {:else if currentView === 'list'}<PasteList on:view={(event) => navigate('view', event.detail)}/>
+      {:else if currentView === 'library'}<Library on:view={(event) => navigate('view', event.detail)}/>{/if}
     </main>
-
-    <!-- Footer -->
-    <footer class="border-t border-[var(--border)] py-4 mt-12" role="contentinfo">
-      <div class="max-w-5xl mx-auto px-6 flex items-center justify-between text-xs text-[var(--text-secondary)]">
-        <span>PasteBox — code sharing made simple</span>
-        <div class="flex gap-4">
-          <span title="Press N for new, L for list" aria-label="Keyboard shortcuts: N for new paste, L for browse list">⌨ Shortcuts</span>
-        </div>
-      </div>
-    </footer>
+    <footer class="site-footer"><div><span class="footer-logo">pastebox.</span><span>A little less friction. A lot more sharing.</span></div><button class="text-button" on:click={() => shortcuts.showModal()}>Keyboard shortcuts <kbd>?</kbd></button></footer>
   </div>
-
-  <Toast />
+  <dialog bind:this={shortcuts} class="shortcut-dialog" aria-labelledby="shortcuts-title">
+    <h2 id="shortcuts-title">Make yourself at home.</h2><p class="muted">A few shortcuts to keep you in flow.</p>
+    <dl class="shortcut-list"><div><dt>New paste</dt><dd><kbd>N</kbd></dd></div><div><dt>Explore</dt><dd><kbd>L</kbd></dd></div><div><dt>Your library</dt><dd><kbd>B</kbd></dd></div><div><dt>Create / save in editor</dt><dd><kbd>Ctrl / ⌘</kbd> + <kbd>Enter</kbd></dd></div></dl>
+    <form method="dialog"><button class="button primary">Got it</button></form>
+  </dialog>
+  <Toast/>
 {/if}
-
-<style>
-  .sr-only {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
-  }
-</style>

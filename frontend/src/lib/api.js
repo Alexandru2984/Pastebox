@@ -104,3 +104,12 @@ export async function getRawPaste(id, password = '') {
   if (!res.ok) throw new Error('Raw content is unavailable');
   return res.text();
 }
+
+export async function restoreOwnerKey(id, token) {
+  if (!/^[a-zA-Z0-9]{1,64}$/.test(id) || !/^[a-f0-9]{64}$/.test(token)) throw new Error('Invalid paste ID or owner key');
+  const res = await fetch(`/api/pastes/${encodeURIComponent(id)}/ownership`, { headers: { 'X-Owner-Token': token } });
+  const json = await res.json();
+  if (!res.ok || !json.can_manage) throw new Error(json.error || 'This key does not own the paste');
+  const saved = rememberPaste({ ...json, owner_token: token });
+  return { ...json, owner_saved: saved };
+}

@@ -53,3 +53,9 @@ Priorities: correctness and privacy first, useful sharing second, discovery/auto
 - Internationalization, share cards for public pastes, public collections and curated snippets.
 
 Avoid launching comments, executable code previews, arbitrary URL imports or anonymous HTML rendering without dedicated abuse and sandbox controls.
+
+## Delivered product stage
+
+Explore now searches titles/tags and filters language/tag with stable newest/oldest/popular ordering. Browser library supports favorites, local owner capabilities and verified key restoration without revealing one-time content. New responsive application shell, native accessible theme picker, error retry states and semantic cards replace nested controls.
+
+The composer adds starter templates, text/code file import, JSON formatting, UTF-8 byte validation, guarded submission, word wrap, Tab indentation with an Escape exit, and explicit public-only draft persistence. Protected/unlisted/one-time content is excluded from draft storage. No cross-device account or end-to-end encryption is claimed.

@@ -70,11 +70,16 @@ export function applyTheme(themeName) {
   root.style.setProperty('--accent-hover', theme.accentHover);
   root.style.setProperty('--green', theme.green);
   root.style.setProperty('--red', theme.red);
-  localStorage.setItem('pastebox-theme', themeName);
+  root.dataset.theme = themes[themeName] ? themeName : 'dark';
+  root.style.colorScheme = themeName === 'light' ? 'light' : 'dark';
+  try { localStorage.setItem('pastebox-theme', themeName); } catch {}
 }
 
 export function getStoredTheme() {
-  return localStorage.getItem('pastebox-theme') || 'dark';
+  try {
+    const saved = localStorage.getItem('pastebox-theme');
+    return themes[saved] ? saved : 'dark';
+  } catch { return 'dark'; }
 }
 
 export function initTheme() {

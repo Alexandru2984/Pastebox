@@ -41,7 +41,7 @@ describe('PasteList', () => {
     render(PasteList);
 
     await waitFor(() => {
-      expect(screen.getByText(/failed to load/i)).toBeTruthy();
+      expect(screen.getByRole('alert').textContent).toContain('Network error');
     });
   });
 

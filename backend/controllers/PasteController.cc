@@ -347,3 +347,10 @@ void PasteController::healthCheck(const HttpRequestPtr &, Callback &&callback) {
         app().getDbClient()->execSqlSync("SELECT 1"); Json::Value json; json["status"] = "ok"; return response(json);
     });
 }
+
+void PasteController::ownership(const HttpRequestPtr &req, Callback &&callback, const std::string &id) {
+    handle(std::move(callback),[req,id] {
+        auto db = app().getDbClient(); auto row = find(db,id); authorize(row,req,true);
+        auto json = serialize(row,db,false); json["can_manage"] = true; return response(json);
+    });
+}

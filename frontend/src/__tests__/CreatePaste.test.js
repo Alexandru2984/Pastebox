@@ -23,7 +23,7 @@ describe('CreatePaste', () => {
   it('renders the form with all fields', () => {
     render(CreatePaste);
 
-    expect(screen.getByLabelText(/title/i)).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Paste title' })).toBeTruthy();
     expect(screen.getByLabelText(/paste content/i)).toBeTruthy();
     expect(screen.getByLabelText(/^language$/i)).toBeTruthy();
     expect(screen.getByLabelText(/visibility/i)).toBeTruthy();
@@ -63,7 +63,7 @@ describe('CreatePaste', () => {
 
   it('has tags field', () => {
     render(CreatePaste);
-    const tags = screen.getByLabelText(/tags/i);
+    const tags = screen.getByRole('textbox', { name: 'Tags' });
     expect(tags).toBeTruthy();
   });
 
@@ -100,7 +100,7 @@ describe('CreatePaste', () => {
 
     render(CreatePaste);
     const textarea = screen.getByLabelText(/paste content/i);
-    const title = screen.getByLabelText(/title/i);
+    const title = screen.getByRole('textbox', { name: 'Paste title' });
 
     await fireEvent.input(title, { target: { value: 'My Paste' } });
     await fireEvent.input(textarea, { target: { value: 'console.log("hello")' } });
@@ -118,4 +118,20 @@ describe('CreatePaste', () => {
     const body = document.body.textContent;
     expect(body).toContain('Ctrl');
   });
+});
+
+it('prevents duplicate submission while a create is in progress', async () => {
+  vi.clearAllMocks();
+  createPaste.mockReturnValueOnce(new Promise(() => {}));
+  render(CreatePaste);
+  await fireEvent.input(screen.getByLabelText(/paste content/i), { target: { value: 'my snippet' } });
+  await fireEvent.keyDown(screen.getByLabelText(/paste content/i), { key: 'Enter', ctrlKey: true });
+  await fireEvent.keyDown(screen.getByLabelText(/paste content/i), { key: 'Enter', ctrlKey: true });
+  expect(createPaste).toHaveBeenCalledTimes(1);
+});
+
+it('disables draft persistence for protected content', async () => {
+  render(CreatePaste);
+  await fireEvent.input(screen.getByLabelText(/password protection/i), { target: { value: 'secret password' } });
+  expect(screen.getByLabelText(/save public draft/i).disabled).toBe(true);
 });

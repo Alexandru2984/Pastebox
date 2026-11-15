@@ -156,6 +156,16 @@ class API(unittest.TestCase):
             stored = connection.execute("SELECT password_hash FROM pastes WHERE id='legacyPassword'").fetchone()[0]
         self.assertTrue(stored.startswith('scrypt$16384$8$5$'))
 
+    def test_owner_key_verification_does_not_consume_burn(self):
+        paste = self.create(burn_after_read=True,visibility='private')
+        path = '/api/pastes/'+paste['id']
+        self.assertEqual(self.request(path+'/ownership',token='f'*64)[0],403)
+        code, meta, _ = self.request(path+'/ownership',token=paste['owner_token'])
+        self.assertEqual(code,200)
+        self.assertTrue(meta['can_manage'])
+        self.assertNotIn('content',meta)
+        self.assertEqual(self.request(path,token=paste['owner_token'],headers={'X-Confirm-Burn':'yes'})[0],200)
+
     def test_storage_uses_hashes_and_never_returns_them(self):
         paste = self.create(password='good password')
         with sqlite3.connect(self.database) as connection:

@@ -1,10 +1,12 @@
 const KEY = 'pastebox-library-v1';
 const memory = new Map();
+let sessionOnly = false;
 
 export function getLibrary() {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || '[]');
-    if (Array.isArray(saved)) {
+    if (Array.isArray(saved) && !sessionOnly) {
+      memory.clear();
       for (const item of saved) {
         if (item && typeof item.id === 'string' && /^[a-zA-Z0-9]{1,64}$/.test(item.id)) memory.set(item.id, item);
       }
@@ -15,8 +17,9 @@ export function getLibrary() {
 function persist() {
   try {
     localStorage.setItem(KEY, JSON.stringify([...memory.values()]));
+    sessionOnly = false;
     return true;
-  } catch { return false; }
+  } catch { sessionOnly = true; return false; }
 }
 export function rememberPaste(paste) {
   getLibrary();
@@ -34,8 +37,4 @@ export function isFavorite(id) { return Boolean(getLibrary().find(item => item.i
 export function toggleFavorite(paste) {
   rememberPaste(paste);
   const item = memory.get(paste.id); item.favorite = !item.favorite; persist(); return item.favorite;
-}
-export function importOwnerKey(id, token) {
-  if (!/^[a-zA-Z0-9]{1,64}$/.test(id) || !/^[a-f0-9]{64}$/.test(token)) throw new Error('Invalid owner key');
-  return rememberPaste({ id, owner_token: token });
 }

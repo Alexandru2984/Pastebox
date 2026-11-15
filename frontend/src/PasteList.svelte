@@ -1,151 +1,41 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
   import { listPastes } from './lib/api.js';
-
+  import { LANGUAGES } from './lib/languages.js';
+  import { timeAgo, formatSize } from './lib/format.js';
+  import Icon from './Icon.svelte';
   const dispatch = createEventDispatcher();
-
-  let pastes = [];
-  let loading = true;
-  let error = '';
-  let filterTag = '';
-  let page = 1;
-  let hasMore = false;
-
-  onMount(() => loadPastes());
-
-  async function loadPastes(tag = '', p = 1) {
-    loading = true;
+  let pastes = [], loading = true, error = '', filterTag = '', query = '', language = '', sort = 'newest';
+  let page = 1, hasMore = false, requestNumber = 0;
+  onMount(() => { loadPastes(); return () => { requestNumber++; }; });
+  async function loadPastes(tag = filterTag, p = 1) {
+    const request = ++requestNumber;
+    loading = true; error = ''; filterTag = tag;
     try {
-      const result = await listPastes(tag, p);
-      pastes = result.data || result;
-      page = result.page || p;
-      hasMore = result.has_more || false;
-      filterTag = tag;
-    } catch (e) {
-      error = 'Failed to load pastes';
-    } finally {
-      loading = false;
-    }
+      const result = await listPastes(tag, p, 24, { q: query.trim(), language, sort });
+      if (request !== requestNumber) return;
+      pastes = result.data || []; page = result.page || p; hasMore = Boolean(result.has_more);
+    } catch (e) { if (request === requestNumber) error = e.message || 'Failed to load pastes'; }
+    finally { if (request === requestNumber) loading = false; }
   }
-
-  function nextPage() { loadPastes(filterTag, page + 1); }
-  function prevPage() { if (page > 1) loadPastes(filterTag, page - 1); }
-
-  function formatDate(dateStr) {
-    const d = new Date(dateStr + 'Z');
-    const now = new Date();
-    const diff = Math.floor((now - d) / 1000);
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return `${Math.floor(diff / 86400)}d ago`;
-  }
-
-  function formatSize(bytes) {
-    if (bytes < 1024) return `${bytes} B`;
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  const langColors = {
-    javascript: '#f1e05a', typescript: '#3178c6', python: '#3572a5', rust: '#dea584',
-    go: '#00add8', c: '#555555', cpp: '#f34b7d', java: '#b07219', ruby: '#701516',
-    php: '#4f5d95', html: '#e34c26', css: '#563d7c', sql: '#e38c00', bash: '#89e051',
-    json: '#292929', plaintext: '#8b949e', swift: '#f05138', kotlin: '#a97bff',
-    elixir: '#6e4a7e', haskell: '#5e5086', scala: '#c22d40', lua: '#000080'
-  };
 </script>
-
-<section class="space-y-5" aria-label="Paste list">
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-    <h2 class="text-2xl font-semibold text-[var(--text-primary)]">
-      {filterTag ? `Pastes tagged #${filterTag}` : 'Recent Pastes'}
-    </h2>
-    {#if filterTag}
-      <button on:click={() => loadPastes('')}
-        class="text-sm text-[var(--accent)] hover:underline bg-transparent border-none cursor-pointer"
-        aria-label="Clear tag filter">
-        ← All pastes
-      </button>
-    {/if}
-  </div>
-
-  {#if loading}
-    <div class="flex justify-center py-12" role="status" aria-live="polite">
-      <div class="text-[var(--text-secondary)]">Loading...</div>
-    </div>
-  {:else if error}
-    <div class="text-[var(--red)] py-8 text-center" role="alert">{error}</div>
-  {:else if pastes.length === 0}
-    <div class="flex flex-col items-center py-16 gap-4 text-[var(--text-secondary)]">
-      <div class="text-5xl" aria-hidden="true">📝</div>
-      <p>No pastes yet. Create the first one!</p>
-    </div>
-  {:else}
-    <ul class="space-y-2 list-none p-0 m-0" role="list" aria-label="Pastes">
-      {#each pastes as paste}
-        <li>
-          <button
-            on:click={() => dispatch('view', paste.id)}
-            class="w-full text-left bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-4
-              hover:border-[var(--accent)] transition-colors cursor-pointer group"
-            aria-label="View paste: {paste.title}"
-          >
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div class="flex items-center gap-3 min-w-0">
-                <span class="w-3 h-3 rounded-full inline-block shrink-0" aria-hidden="true"
-                  style="background-color: {langColors[paste.language] || '#8b949e'}"></span>
-                <span class="font-medium text-[var(--text-primary)] group-hover:text-[var(--accent)] transition-colors truncate">
-                  {paste.title}
-                </span>
-                <span class="text-xs font-mono px-2 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] shrink-0">
-                  {paste.language}
-                </span>
-                {#if paste.burn_after_read}
-                  <span class="text-xs" title="Burns after reading" aria-label="Burns after reading">🔥</span>
-                {/if}
-                {#if paste.has_password}
-                  <span class="text-xs" title="Password protected" aria-label="Password protected">🔑</span>
-                {/if}
-                {#if paste.expires_at}
-                  <span class="text-xs" title="Has expiration" aria-label="Has expiration">⏰</span>
-                {/if}
-              </div>
-              <div class="flex items-center gap-3 text-xs text-[var(--text-secondary)] shrink-0">
-                <span>{paste.views} views</span>
-                <span>{formatSize(paste.size)}</span>
-                <span>{formatDate(paste.created_at)}</span>
-              </div>
-            </div>
-            {#if paste.tags && paste.tags.length > 0}
-              <div class="flex gap-1.5 mt-2">
-                {#each paste.tags as tag}
-                  <button
-                    on:click|stopPropagation={() => loadPastes(tag)}
-                    class="text-xs px-2 py-0.5 rounded-full bg-[var(--accent)]/10 text-[var(--accent)]
-                      hover:bg-[var(--accent)]/20 cursor-pointer border-none"
-                    aria-label="Filter by tag {tag}"
-                  >#{tag}</button>
-                {/each}
-              </div>
-            {/if}
-          </button>
-        </li>
-      {/each}
-    </ul>
-
-    <!-- Pagination -->
-    <nav class="flex items-center justify-center gap-4 pt-2" aria-label="Pagination">
-      <button on:click={prevPage} disabled={page <= 1}
-        class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg text-sm
-          text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors cursor-pointer
-          disabled:opacity-40 disabled:cursor-not-allowed"
-        aria-label="Previous page">← Prev</button>
-      <span class="text-sm text-[var(--text-secondary)]" aria-current="page">Page {page}</span>
-      <button on:click={nextPage} disabled={!hasMore}
-        class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg text-sm
-          text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors cursor-pointer
-          disabled:opacity-40 disabled:cursor-not-allowed"
-        aria-label="Next page">Next →</button>
-    </nav>
-  {/if}
+<section aria-label="Paste list">
+  <div class="page-heading"><div><div class="eyebrow"><span class="status-dot"></span> THE PUBLIC NOTEBOOK</div><h1>Good code travels.</h1><p class="subheading">Explore fresh ideas, handy snippets, and things worth sharing.</p></div><a href="#/" class="button"><Icon name="plus" size={15}/> Share a snippet</a></div>
+  <form class="filter-bar" on:submit|preventDefault={() => loadPastes()} role="search">
+    <label class="search-field"><span class="sr-only">Search public pastes</span><Icon name="search" size={17}/><input bind:value={query} maxlength="100" placeholder="Search titles and tags…" type="search"/></label>
+    <select bind:value={language} on:change={() => loadPastes()} aria-label="Filter by language"><option value="">All languages</option>{#each LANGUAGES as lang}<option value={lang}>{lang}</option>{/each}</select>
+    <select bind:value={sort} on:change={() => loadPastes()} aria-label="Sort pastes"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="popular">Most viewed</option></select>
+    <button class="button" type="submit">Search</button>
+  </form>
+  <div class="result-meta"><span>{filterTag ? `Pastes tagged #${filterTag}` : 'Recent Pastes'}{!loading && !error ? ` · ${pastes.length} on this page` : ''}</span>{#if filterTag}<button class="text-button" on:click={() => loadPastes('')}>Clear tag filter ×</button>{/if}</div>
+  {#if loading}<div class="paste-grid" role="status" aria-label="Loading pastes"><span class="sr-only">Loading…</span>{#each [1,2,3,4] as item}<div class="skeleton" aria-hidden="true"></div>{/each}</div>
+  {:else if error}<div class="empty-state" role="alert"><h2>Couldn't load these snippets.</h2><p>{error}</p><button class="button" on:click={() => loadPastes(filterTag,page)}>Try again</button></div>
+  {:else if pastes.length === 0}<div class="empty-state"><Icon name="search" size={30}/><h2>No pastes found.</h2><p>Try a different search or language, or share something of your own.</p><a class="button" href="#/">Create a paste <Icon name="arrow" size={15}/></a></div>
+  {:else}<ul class="paste-grid" aria-label="Pastes">{#each pastes as paste (paste.id)}<li><article class="paste-card">
+    <div class="paste-card-head"><span class="language-label"><span class="language-dot"></span>{paste.language}</span><span class="muted" style="font-size:10px">{#if paste.has_password}<Icon name="lock" size={13}/>{:else}PUBLIC{/if}</span></div>
+    <h2 class="card-title"><button on:click={() => dispatch('view',paste.id)} aria-label="View paste: {paste.title || 'Untitled'}">{paste.title || 'Untitled'}</button></h2>
+    <div class="card-details"><span><Icon name="clock" size={12}/>{timeAgo(paste.created_at)}</span><span>{formatSize(paste.size)}</span><span>{paste.views || 0} views</span>{#if paste.burn_after_read}<span>One-time</span>{/if}{#if paste.expires_at}<span>Expires</span>{/if}</div>
+    {#if paste.tags?.length}<div class="tag-list">{#each paste.tags as tag}<button class="tag" on:click={() => loadPastes(tag)} aria-label="Filter by tag {tag}">#{tag}</button>{/each}</div>{/if}
+  </article></li>{/each}</ul>
+  <nav class="pagination" aria-label="Pagination">{#if page > 1}<button class="button small" on:click={() => loadPastes(filterTag,page-1)} aria-label="Previous page">← Previous</button>{/if}<span aria-current="page">Page {page}</span><button class="button small" on:click={() => loadPastes(filterTag,page+1)} disabled={!hasMore} aria-label="Next page">Next <Icon name="arrow" size={13}/></button></nav>{/if}
 </section>

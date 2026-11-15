@@ -1,7 +1,6 @@
 <script>
   import { createEventDispatcher, onMount, tick } from 'svelte';
-  import { getPaste, forkPaste, updatePaste, getRawUrl } from './lib/api.js';
-  import { importOwnerKey } from './lib/library.js';
+  import { getPaste, forkPaste, updatePaste, getRawUrl, restoreOwnerKey } from './lib/api.js';
   import { success, error as toastError } from './lib/toast.js';
   import hljs from 'highlight.js';
   import 'highlight.js/styles/github-dark.css';
@@ -83,8 +82,8 @@
     }
   }
 
-  function restoreOwner() {
-    try { importOwnerKey(pasteId, ownerInput.trim()); loadPaste(); }
+  async function restoreOwner() {
+    try { await restoreOwnerKey(pasteId, ownerInput.trim()); ownerInput = ''; loadPaste(); }
     catch (e) { toastError(e.message); }
   }
 

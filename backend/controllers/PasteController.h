@@ -11,6 +11,7 @@ public:
     ADD_METHOD_TO(PasteController::deletePaste, "/api/pastes/{id}", Delete);
     ADD_METHOD_TO(PasteController::getRawPaste, "/api/pastes/{id}/raw", Get);
     ADD_METHOD_TO(PasteController::forkPaste, "/api/pastes/{id}/fork", Post);
+    ADD_METHOD_TO(PasteController::ownership, "/api/pastes/{id}/ownership", Get);
     ADD_METHOD_TO(PasteController::healthCheck, "/api/health", Get);
     METHOD_LIST_END
     using Callback = std::function<void(const HttpResponsePtr &)>;
@@ -21,5 +22,6 @@ public:
     void deletePaste(const HttpRequestPtr &, Callback &&, const std::string &);
     void getRawPaste(const HttpRequestPtr &, Callback &&, const std::string &);
     void forkPaste(const HttpRequestPtr &, Callback &&, const std::string &);
+    void ownership(const HttpRequestPtr &, Callback &&, const std::string &);
     void healthCheck(const HttpRequestPtr &, Callback &&);
 };

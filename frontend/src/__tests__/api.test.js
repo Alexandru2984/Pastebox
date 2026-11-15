@@ -196,3 +196,25 @@ describe('API Client', () => {
     });
   });
 });
+
+describe('Owner capability handling', () => {
+  it('keeps owner keys out of public URLs and sends the key for the matching paste only', async () => {
+    const { rememberPaste } = await import('../lib/library.js');
+    rememberPaste({ id: 'ownedSecurityCase', owner_token: 'a'.repeat(64) });
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'ownedSecurityCase' }) });
+    await getPaste('ownedSecurityCase');
+    expect(mockFetch.mock.lastCall[1].headers['X-Owner-Token']).toBe('a'.repeat(64));
+    expect(mockFetch.mock.lastCall[0]).not.toContain('a'.repeat(64));
+    await getPaste('unrelatedSecurityCase');
+    expect(mockFetch.mock.lastCall[1].headers['X-Owner-Token']).toBeUndefined();
+  });
+
+  it('does not replace a saved owner key when an imported key fails verification', async () => {
+    const { rememberPaste, ownerToken } = await import('../lib/library.js');
+    const { restoreOwnerKey } = await import('../lib/api.js');
+    rememberPaste({ id: 'restoreSecurityCase', owner_token: 'b'.repeat(64) });
+    mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Owner key required' }) });
+    await expect(restoreOwnerKey('restoreSecurityCase','c'.repeat(64))).rejects.toThrow('Owner key required');
+    expect(ownerToken('restoreSecurityCase')).toBe('b'.repeat(64));
+  });
+});
