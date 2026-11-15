@@ -106,3 +106,14 @@ Legacy forks retain an upgraded password verifier rather than copying a stale pr
 ## Latest production status
 
 Revision history, safe Markdown preview, aggregate password resource limits and legacy-fork/mobile fixes are live. See [release 2 verification](RELEASE-2026-11-15-R2.md). The next increments remain multi-file documents, capability management, accounts/encryption and production operations work listed above.
+
+## Release 3 plan: access management and code navigation
+
+1. Add an owner-only access endpoint for changing visibility, reading password and expiration after publication. Require the current revision, apply changes atomically and preserve content/history. Password removal and removal of expiration must be explicit; omitted fields keep their current values.
+2. Allow replacement of an exposed owner key with a browser-generated 256-bit key. Stage the replacement locally before sending it, require a private backup acknowledgement, and verify pending replacements through the metadata-only ownership endpoint after uncertain responses. The old key must lose all owner rights immediately after commit. Secrets never go in share links.
+3. Add bounded literal search, line navigation, selected-line copying and range permalinks. Changing a range in the same document must not reload or reveal/consume it again. Preserve the large-document DOM/work limits and 320px layout.
+4. Exercise isolated API authorization/concurrency/rollback cases, browser interruption recovery and desktop/mobile workflows. Back up and restore-check before deploying exact tested artifacts; verify production with writes blocked.
+
+Security review: the main new risks are unauthorized access-policy changes, lockout during key replacement and accidental credential disclosure. Owner authorization and revision checks run within the mutation transaction. Key staging and recovery retain both candidates until the server confirms the replacement. Existing copies, forked documents and screenshots cannot be revoked by a policy change. No new vendor or database migration is needed. The existing incident runbook applies; automated incident cases are exercised on disposable data, while the operator tabletop and external alerts remain pending. Financial/compliance scope is unknown, so no cost or compliance certification is inferred.
+
+References: [OWASP session token lifecycle](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html), [OWASP sensitive account changes](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html), [Web Crypto randomness](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/getRandomValues).
