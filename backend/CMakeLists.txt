@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(SQLite3 3.38 REQUIRED)
-find_package(Drogon CONFIG REQUIRED)
+find_package(Drogon 1.9.11 CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 # Explicit links also support the VPS's static Drogon installation.
 find_library(PASTEBOX_BROTLI_DEC brotlidec REQUIRED)

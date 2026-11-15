@@ -74,16 +74,16 @@ Pending wider product work remains listed above: cross-device accounts, encrypti
 
 ## Production status
 
-This release is live. See [release verification and residual work](RELEASE-2026-11-15.md). The checked-in roadmap distinguishes delivered functionality from the next product/security increments; remote CI still requires a push.
+This release is live. See [release verification and residual work](RELEASE-2026-11-15.md). The checked-in roadmap distinguishes delivered functionality from the next product/security increments. Remote CI verification is recorded in [the CI investigation](CI-2026-11-15.md).
 
-## Next release in progress: revision history and safe reading
+## Release 2: revision history and safe reading (delivered)
 
 1. Owner-only bounded revision history, comparison and restore; content edits require an exact current revision so two tabs cannot silently overwrite one another.
 2. Historical snapshots contain title/content/language/tags only. Access controls, passwords and expiration remain current; one-time pastes never create reusable snapshots. Deletion/expiration removes history through the same foreign-key lifecycle.
 3. Lazy, sandboxed Markdown preview without raw HTML or remote image requests, with browser XSS/privacy regressions.
 4. Repeat isolated API/frontend/browser checks, back up and deploy the tested artifacts, then verify the public site read-only.
 
-Cross-device accounts and off-host backup destinations remain separate scope; remote CI execution still requires a repository push.
+Cross-device accounts and off-host backup destinations remain separate scope. Current remote CI evidence is recorded in [the CI investigation](CI-2026-11-15.md).
 
 ### Revision stage delivered
 

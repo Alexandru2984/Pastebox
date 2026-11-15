@@ -33,16 +33,19 @@ Content is plaintext in SQLite. Access control and HTTPS do **not** provide end-
 
 ## Build
 
-Requires Node >=22.12 (Node 24 recommended), CMake >=3.20, C++17, Drogon, OpenSSL, SQLite >=3.38 and Brotli development libraries.
+Requires Node >=22.12 (Node 24 recommended), CMake >=3.20, C++17, Drogon >=1.9.11, OpenSSL, SQLite >=3.38 and Brotli development libraries. CI builds the VPS's Drogon version from an exact commit and verifies its Trantor submodule commit. Ubuntu 24.04's Drogon 1.8.7 is no longer used: remote testing exposed an intermittent SQLite startup failure with that version.
 
 ```bash
-sudo apt install cmake make g++ libdrogon-dev libpq-dev libmariadb-dev \
-  libbrotli-dev libhiredis-dev libc-ares-dev libyaml-cpp-dev libsqlite3-dev libssl-dev libjsoncpp-dev uuid-dev zlib1g-dev
+sudo apt install cmake make g++ git ca-certificates \
+  libbrotli-dev libc-ares-dev libyaml-cpp-dev libsqlite3-dev libssl-dev libjsoncpp-dev uuid-dev zlib1g-dev
+bash scripts/build-ci-drogon.sh /tmp/pastebox-deps
 npm --prefix frontend ci
-cmake -S backend -B /tmp/pastebox-build -DCMAKE_BUILD_TYPE=Release
+cmake -S backend -B /tmp/pastebox-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/tmp/pastebox-deps
 cmake --build /tmp/pastebox-build -j2
 npm --prefix frontend run build -- --outDir /tmp/pastebox-public
 ```
+
+Use a new dependency prefix below `/tmp`; the script refuses existing prefixes and never installs host libraries. An already installed compatible Drogon can be used by omitting the dependency-build step and `CMAKE_PREFIX_PATH`. The pinned CI build enables SQLite and leaves unused PostgreSQL/MySQL/Redis drivers out.
 
 Preview with disposable data and an automatically selected loopback port:
 

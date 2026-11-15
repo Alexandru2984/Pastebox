@@ -100,3 +100,7 @@ Fork authorization may upgrade a legacy SHA-256 verifier inside its transaction.
 ## Continuation production result
 
 The history/Markdown/resource-guard release is live. All 145 cases passed, including the native and CPU-limited distribution API suites. Live read-only UI verification exercised an unpublished Markdown draft through Cloudflare at 375px/320px with writes blocked, reporting zero writes/runtime errors. Snapshot/restore, live schema/integrity, active-record preservation and artifact identity were verified. See [release 2](RELEASE-2026-11-15-R2.md) for evidence, the new backup path and remaining limits.
+
+## CI follow-up
+
+The first GitHub runs exposed shared quota state between test cases. API and browser cases now use separate backend processes/databases without disabling any production throttle or retrying mutations. That correction passed on main and five dependency PRs. One other PR exposed a separate SQLite startup timeout with Ubuntu's Drogon 1.8.7. A local workflow correction pins the VPS's 1.9.11 source and Trantor revisions, installs dependencies only in a disposable prefix, and rejects older Drogon at configuration. This second correction has not been published; explicit user approval is required before any further push or remote branch update. See [the investigation and exact remote results](CI-2026-11-15.md). Prior distribution-suite passes do not establish that 1.8.7 startup is reliable.

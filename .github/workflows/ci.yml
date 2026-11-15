@@ -24,10 +24,12 @@ jobs:
       - name: Install C++ prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake make g++ libdrogon-dev libpq-dev libmariadb-dev libbrotli-dev libhiredis-dev libc-ares-dev libyaml-cpp-dev libsqlite3-dev libssl-dev libjsoncpp-dev uuid-dev zlib1g-dev
+          sudo apt-get install -y cmake make g++ git ca-certificates libbrotli-dev libc-ares-dev libyaml-cpp-dev libsqlite3-dev libssl-dev libjsoncpp-dev uuid-dev zlib1g-dev
+      - name: Build pinned production framework
+        run: bash scripts/build-ci-drogon.sh /tmp/pastebox-ci-deps
       - name: Build hardened API
         run: |
-          cmake -S backend -B /tmp/pastebox-ci-build -DCMAKE_BUILD_TYPE=Release
+          cmake -S backend -B /tmp/pastebox-ci-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/tmp/pastebox-ci-deps
           cmake --build /tmp/pastebox-ci-build -j2
           ctest --test-dir /tmp/pastebox-ci-build --output-on-failure
       - name: Install and verify frontend
