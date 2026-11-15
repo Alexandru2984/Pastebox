@@ -98,3 +98,7 @@ The expanded app entry is about 143 KB / 53 KB gzip; the 50 KB parser worker and
 ### Password resource guard delivered
 
 Added an aggregate scrypt budget alongside per-IP limits, with an explicit retry response. Distributed password traffic cannot make derivation run without a process-wide cap; owner-key reads do not consume this budget. Regression uses disposable clients/database and verifies readiness remains available.
+
+### Additional compatibility and mobile fixes
+
+Legacy forks retain an upgraded password verifier rather than copying a stale pre-upgrade value. Imported filenames keep an existing correct extension when downloaded. Markdown controls have a dedicated narrow-screen row, file badges show actual extensions, and notification width stays inside the viewport. A reusable UI smoke command blocks writes/third-party traffic while verifying an unpublished preview on production or an isolated loopback server.

@@ -87,6 +87,10 @@ test('text file import, JSON format, draft privacy, theme and mobile fit', async
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({width:320,height:740});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button',{name:'Create paste',exact:true}).click();
+  await expect(page).toHaveURL(/#\/paste\/[a-f0-9]{16}$/);
+  const [download] = await Promise.all([page.waitForEvent('download'),page.getByRole('button',{name:'Download paste as file'}).click()]);
+  expect(download.suggestedFilename()).toBe('settings.json');
 });
 
 test('password readers can unlock and download without receiving edit access', async ({page,browser}) => {

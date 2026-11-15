@@ -2,7 +2,7 @@
   import { toasts, removeToast } from './lib/toast.js';
 </script>
 
-<div class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" style="max-width: 400px;"
+<div class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" style="width: min(400px, calc(100vw - 2rem));"
   aria-live="polite" aria-atomic="false" role="status">
   {#each $toasts as toast (toast.id)}
     <div
@@ -12,7 +12,7 @@
          'bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)]'}"
       role={toast.type === 'error' ? 'alert' : 'status'}
     >
-      <span class="text-sm">
+      <span class="text-sm break-words min-w-0">
         <span aria-hidden="true">{#if toast.type === 'success'}✓{:else if toast.type === 'error'}✕{:else}ℹ{/if}</span>
         {toast.message}
       </span>

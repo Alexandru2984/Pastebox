@@ -16,8 +16,9 @@ export async function copyText(text) {
   if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable. Select and copy the text manually.');
   await navigator.clipboard.writeText(text);
 }
-export const EXTENSIONS = { plaintext:'txt', javascript:'js', typescript:'ts', python:'py', ruby:'rb', rust:'rs', cpp:'cpp', csharp:'cs', bash:'sh', shell:'sh', markdown:'md', yaml:'yml', dockerfile:'Dockerfile', makefile:'Makefile' };
+export const EXTENSIONS = { plaintext:'txt', auto:'txt', cobol:'cob', javascript:'js', typescript:'ts', python:'py', ruby:'rb', rust:'rs', cpp:'cpp', csharp:'cs', bash:'sh', shell:'sh', markdown:'md', yaml:'yml', dockerfile:'Dockerfile', makefile:'Makefile' };
 export function safeFilename(title, language) {
   const base = (title || 'paste').normalize('NFKC').replace(/[^\p{L}\p{N}_. -]/gu,'_').replace(/^\.+/, '').slice(0,100) || 'paste';
-  return `${base}.${EXTENSIONS[language] || language.replace(/[^a-z0-9]/gi,'').slice(0,12) || 'txt'}`;
+  const extension = EXTENSIONS[language] || language.replace(/[^a-z0-9]/gi,'').slice(0,12) || 'txt';
+  return base.toLowerCase().endsWith(`.${extension.toLowerCase()}`) || (['Dockerfile','Makefile'].includes(extension) && base === extension) ? base : `${base}.${extension}`;
 }

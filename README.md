@@ -67,7 +67,7 @@ PASTEBOX_TEST_PUBLIC=/tmp/pastebox-public npm run test:e2e
 
 The Python API suite always creates its own server/database. It does not accept a remote base URL. `backend/test.sh /path/to/test-build/backend` runs this same isolated suite; the old production-default shell tests have been replaced. Playwright starts another disposable backend on loopback port 19779 and runs desktop/mobile workflows.
 
-Current suites: 99 frontend cases, 27 API security/lifecycle cases and 18 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
+Current suites: 99 frontend cases, 28 API security/lifecycle cases and 18 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
 
 GitHub Actions performs clean installs, hardened C++ build, API regressions, frontend tests/build, dependency audit and browser flows. Actions are pinned to commit SHAs; credentials are read-only and there is no deployment or production secret in CI. Dependabot opens weekly dependency update PRs. A workflow file is not evidence that remote CI has already run.
 
@@ -119,6 +119,6 @@ sudo scripts/deploy-vps.sh /path/to/tested/backend /path/to/tested/public
 
 It requires the existing PasteBox service, paths, certificates and maintained Cloudflare nginx origin guard. It stores a restricted online SQLite snapshot, checks integrity, performs a disposable restore check, saves old binary/assets/config, validates nginx, installs artifacts and restarts only PasteBox. Old hashed assets remain available to open browser tabs. Failed readiness triggers artifact/config rollback; the live database is retained because schema changes are additive. Backups remain under `/var/backups/pastebox` and require an operator retention/off-host backup policy.
 
-Read-only live checks: `python3 scripts/smoke.py`. See the [release verification](docs/RELEASE-2026-11-15.md).
+Read-only live checks: `python3 scripts/smoke.py` and `npm --prefix frontend run smoke:ui` (after installing the Playwright browser). The UI check blocks writes and third-party requests, previews an unpublished draft and verifies narrow layouts. See the [release verification](docs/RELEASE-2026-11-15.md).
 
 See [security findings and remaining risks](docs/SECURITY-AUDIT.md), [product roadmap](docs/ROADMAP.md), and [release/response procedure](docs/OPERATIONS.md). SEO indexes the homepage only; API/embed responses are noindex and the sitemap contains no user pastes. Hash routing does not provide server-rendered per-paste previews.
