@@ -13,6 +13,10 @@ public:
     ADD_METHOD_TO(PasteController::forkPaste, "/api/pastes/{id}/fork", Post);
     ADD_METHOD_TO(PasteController::embed, "/api/pastes/{id}/embed", Get);
     ADD_METHOD_TO(PasteController::ownership, "/api/pastes/{id}/ownership", Get);
+    ADD_METHOD_TO(PasteController::listRevisions, "/api/pastes/{id}/revisions", Get);
+    ADD_METHOD_TO(PasteController::getRevision, "/api/pastes/{id}/revisions/{revision}", Get);
+    ADD_METHOD_TO(PasteController::restoreRevision, "/api/pastes/{id}/revisions/{revision}/restore", Post);
+    ADD_METHOD_TO(PasteController::clearRevisions, "/api/pastes/{id}/revisions", Delete);
     ADD_METHOD_TO(PasteController::healthCheck, "/api/health", Get);
     METHOD_LIST_END
     using Callback = std::function<void(const HttpResponsePtr &)>;
@@ -25,5 +29,9 @@ public:
     void forkPaste(const HttpRequestPtr &, Callback &&, const std::string &);
     void embed(const HttpRequestPtr &, Callback &&, const std::string &);
     void ownership(const HttpRequestPtr &, Callback &&, const std::string &);
+    void listRevisions(const HttpRequestPtr &, Callback &&, const std::string &);
+    void getRevision(const HttpRequestPtr &, Callback &&, const std::string &, const std::string &);
+    void restoreRevision(const HttpRequestPtr &, Callback &&, const std::string &, const std::string &);
+    void clearRevisions(const HttpRequestPtr &, Callback &&, const std::string &);
     void healthCheck(const HttpRequestPtr &, Callback &&);
 };

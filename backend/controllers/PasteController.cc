@@ -15,6 +15,7 @@
 using namespace drogon::orm;
 namespace {
 constexpr size_t MAX_CONTENT = 512 * 1024;
+constexpr int HISTORY_LIMIT = 10;
 struct Failure { HttpStatusCode status; std::string message; bool password = false; bool owner = false; bool burn = false; };
 void fail(HttpStatusCode code, const std::string &message) { throw Failure{code, message}; }
 HttpResponsePtr response(const Json::Value &json, HttpStatusCode code = k200OK) {
@@ -166,6 +167,7 @@ Json::Value serialize(const Row &row, const DbClientPtr &db, bool includeContent
     for (const auto *key : {"id","title","language","created_at","visibility"}) json[key] = value(row,key);
     for (const auto *key : {"expires_at","parent_id","updated_at"})
         json[key] = value(row,key).empty() ? Json::Value(Json::nullValue) : Json::Value(value(row,key));
+    json["revision"] = row["revision"].as<int64_t>();
     json["views"] = row["views"].as<int64_t>();
     json["size"] = static_cast<Json::UInt64>(value(row,"content").size());
     json["has_password"] = !value(row,"password_hash").empty();
@@ -175,6 +177,45 @@ Json::Value serialize(const Row &row, const DbClientPtr &db, bool includeContent
     auto rows = db->execSqlSync("SELECT tag FROM tags WHERE paste_id=? ORDER BY tag", value(row,"id"));
     for (const auto &tag : rows) list.append(value(tag,"tag"));
     json["tags"] = list;
+    return json;
+}
+std::string revisionTag(const std::string &id, int64_t revision) {
+    return "\"paste-" + id + "-v" + std::to_string(revision) + "\"";
+}
+void requireRevision(const HttpRequestPtr &req, const Row &row) {
+    const auto &tag = req->getHeader("If-Match");
+    if (tag.empty()) fail(k428PreconditionRequired,"Reload this paste before saving: If-Match with its current revision is required.");
+    if (tag != revisionTag(value(row,"id"),row["revision"].as<int64_t>()))
+        fail(k412PreconditionFailed,"A newer version was saved. Your changes have not been applied.");
+}
+HttpResponsePtr versioned(const Json::Value &json) {
+    auto res = response(json);
+    res->addHeader("ETag",revisionTag(json["id"].asString(),json["revision"].asInt64()));
+    return res;
+}
+void historyAllowed(const Row &row) {
+    if (row["burn_after_read"].as<int>() != 0) fail(k409Conflict,"One-time pastes do not keep revision history and cannot be edited.");
+}
+int revisionNumber(const std::string &text) {
+    int number = 0;
+    auto parsed = std::from_chars(text.data(),text.data()+text.size(),number);
+    if (parsed.ec != std::errc() || parsed.ptr != text.data()+text.size() || number < 1)
+        fail(k404NotFound,"Revision not found");
+    return number;
+}
+void snapshot(const Row &row, const DbClientPtr &db) {
+    auto json = serialize(row,db,false);
+    Json::StreamWriterBuilder writer; writer["indentation"] = "";
+    const std::string saved = value(row,"updated_at").empty() ? value(row,"created_at") : value(row,"updated_at");
+    db->execSqlSync("INSERT INTO paste_revisions(paste_id,revision,title,content,language,tags_json,saved_at) VALUES(?,?,?,?,?,?,?)",
+        value(row,"id"),row["revision"].as<int64_t>(),value(row,"title"),value(row,"content"),value(row,"language"),
+        Json::writeString(writer,json["tags"]),saved);
+    db->execSqlSync("DELETE FROM paste_revisions WHERE paste_id=? AND revision NOT IN "
+        "(SELECT revision FROM paste_revisions WHERE paste_id=? ORDER BY revision DESC LIMIT ?)",value(row,"id"),value(row,"id"),HISTORY_LIMIT);
+}
+Json::Value parseTags(const std::string &text) {
+    Json::CharReaderBuilder reader; std::istringstream input(text); Json::Value json; std::string errors;
+    if (!Json::parseFromStream(reader,input,&json,&errors) || !json.isArray()) throw std::runtime_error("Invalid revision tags");
     return json;
 }
 // Commit is asynchronous in Drogon: send success only after its commit callback.
@@ -241,7 +282,7 @@ void PasteController::createPaste(const HttpRequestPtr &req, Callback &&callback
     }
 }
 void PasteController::getPaste(const HttpRequestPtr &req, Callback &&callback, const std::string &id) {
-    transaction(std::move(callback),[req,id](const DbClientPtr &db) {return response(read(req,id,db));});
+    transaction(std::move(callback),[req,id](const DbClientPtr &db) {return versioned(read(req,id,db));});
 }
 void PasteController::getRawPaste(const HttpRequestPtr &req, Callback &&callback, const std::string &id) {
     transaction(std::move(callback),[req,id](const DbClientPtr &db) {
@@ -263,11 +304,14 @@ void PasteController::updatePaste(const HttpRequestPtr &req, Callback &&callback
         for (const auto *key : {"password","expires_in","burn_after_read"})
             if (json.isMember(key)) fail(k400BadRequest,"This update field is not supported");
         transaction(std::move(callback),[req,id,json](const DbClientPtr &db) {
-            auto row = find(db,id); authorize(row,req,true);
-            db->execSqlSync("UPDATE pastes SET title=?,content=?,language=?,visibility=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            auto row = find(db,id); authorize(row,req,true); historyAllowed(row); requireRevision(req,row);
+            if (row["revision"].as<int64_t>() >= 2147483647) fail(k409Conflict,"Revision limit reached");
+            snapshot(row,db);
+            auto updated = db->execSqlSync("UPDATE pastes SET title=?,content=?,language=?,visibility=?,updated_at=CURRENT_TIMESTAMP,revision=revision+1 WHERE id=? AND revision=?",
                 json.get("title",value(row,"title")).asString(),json.get("content",value(row,"content")).asString(),
-                json.get("language",value(row,"language")).asString(),json.get("visibility",value(row,"visibility")).asString(),id);
-            tags(db,id,json); return response(serialize(find(db,id),db,false));
+                json.get("language",value(row,"language")).asString(),json.get("visibility",value(row,"visibility")).asString(),id,row["revision"].as<int64_t>());
+            if (updated.affectedRows() != 1) fail(k412PreconditionFailed,"A newer version was saved. Your changes have not been applied.");
+            tags(db,id,json); return versioned(serialize(find(db,id),db,false));
         });
     } catch (...) {
         auto error = std::current_exception();
@@ -364,5 +408,59 @@ void PasteController::embed(const HttpRequestPtr &, Callback &&callback, const s
         if (value(row,"visibility") != "public" || !value(row,"password_hash").empty() || row["burn_after_read"].as<int>() != 0)
             fail(k404NotFound,"Only public, unprotected, reusable pastes can be embedded");
         return response(serialize(row,db));
+    });
+}
+
+void PasteController::listRevisions(const HttpRequestPtr &req, Callback &&callback, const std::string &id) {
+    transaction(std::move(callback),[req,id](const DbClientPtr &db) {
+        auto current = find(db,id); authorize(current,req,true); historyAllowed(current);
+        auto rows = db->execSqlSync("SELECT revision,title,language,length(CAST(content AS BLOB)) AS size,saved_at "
+            "FROM paste_revisions WHERE paste_id=? ORDER BY revision DESC LIMIT ?",id,HISTORY_LIMIT);
+        Json::Value json; json["current_revision"] = current["revision"].as<int64_t>();
+        json["retention_limit"] = HISTORY_LIMIT; json["data"] = Json::Value(Json::arrayValue);
+        for (const auto &row : rows) {
+            Json::Value item; item["revision"] = row["revision"].as<int64_t>(); item["size"] = row["size"].as<int64_t>();
+            for (const auto *key : {"title","language","saved_at"}) item[key] = value(row,key);
+            json["data"].append(item);
+        }
+        return response(json);
+    });
+}
+void PasteController::getRevision(const HttpRequestPtr &req, Callback &&callback, const std::string &id, const std::string &revision) {
+    transaction(std::move(callback),[req,id,revision](const DbClientPtr &db) {
+        auto current = find(db,id); authorize(current,req,true); historyAllowed(current);
+        auto rows = db->execSqlSync("SELECT * FROM paste_revisions WHERE paste_id=? AND revision=?",id,revisionNumber(revision));
+        if (rows.empty()) fail(k404NotFound,"Revision not found");
+        const auto row = rows[0]; Json::Value json; json["revision"] = row["revision"].as<int64_t>();
+        for (const auto *key : {"title","content","language","saved_at"}) json[key] = value(row,key);
+        json["tags"] = parseTags(value(row,"tags_json")); return response(json);
+    });
+}
+void PasteController::restoreRevision(const HttpRequestPtr &req, Callback &&callback, const std::string &id, const std::string &revision) {
+    try {
+        auto json = body(req); if (!json.empty()) fail(k400BadRequest,"Restore accepts an empty JSON object");
+        const int number = revisionNumber(revision);
+        transaction(std::move(callback),[req,id,number](const DbClientPtr &db) {
+            auto current = find(db,id); authorize(current,req,true); historyAllowed(current); requireRevision(req,current);
+            if (current["revision"].as<int64_t>() >= 2147483647) fail(k409Conflict,"Revision limit reached");
+            auto rows = db->execSqlSync("SELECT * FROM paste_revisions WHERE paste_id=? AND revision=?",id,number);
+            if (rows.empty()) fail(k404NotFound,"Revision not found");
+            const auto saved = rows[0]; snapshot(current,db);
+            db->execSqlSync("UPDATE pastes SET title=?,content=?,language=?,updated_at=CURRENT_TIMESTAMP,revision=revision+1 WHERE id=?",
+                value(saved,"title"),value(saved,"content"),value(saved,"language"),id);
+            Json::Value tagUpdate; tagUpdate["tags"] = parseTags(value(saved,"tags_json")); tags(db,id,tagUpdate);
+            return versioned(serialize(find(db,id),db,false));
+        });
+    } catch (...) {
+        auto error = std::current_exception();
+        handle(std::move(callback),[error]() -> HttpResponsePtr {std::rethrow_exception(error);});
+    }
+}
+void PasteController::clearRevisions(const HttpRequestPtr &req, Callback &&callback, const std::string &id) {
+    transaction(std::move(callback),[req,id](const DbClientPtr &db) {
+        auto current = find(db,id); authorize(current,req,true); historyAllowed(current); requireRevision(req,current);
+        db->execSqlSync("DELETE FROM paste_revisions WHERE paste_id=?",id);
+        Json::Value json; json["cleared"] = true; json["current_revision"] = current["revision"].as<int64_t>();
+        return response(json);
     });
 }

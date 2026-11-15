@@ -218,3 +218,13 @@ describe('Owner capability handling', () => {
     expect(ownerToken('restoreSecurityCase')).toBe('b'.repeat(64));
   });
 });
+
+it('sends the exact edit precondition and preserves conflict status for the editor', async () => {
+  mockFetch.mockReset();
+  mockFetch.mockResolvedValueOnce({ok:false,status:412,json:async () => ({error:'A newer version was saved'})});
+  try {
+    await updatePaste('guardCase',{content:'edits'},'',7);
+    expect.unreachable();
+  } catch (error) {expect(error.status).toBe(412);}
+  expect(mockFetch.mock.lastCall[1].headers['If-Match']).toBe('"paste-guardCase-v7"');
+});

@@ -15,12 +15,13 @@ void initDatabase() {
         "content TEXT NOT NULL, language TEXT NOT NULL DEFAULT 'plaintext',"
         "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME, views INTEGER DEFAULT 0,"
         "password_hash TEXT, burn_after_read INTEGER DEFAULT 0, visibility TEXT DEFAULT 'public',"
-        "parent_id TEXT, owner_hash TEXT, updated_at DATETIME)");
+        "parent_id TEXT, owner_hash TEXT, updated_at DATETIME, revision INTEGER NOT NULL DEFAULT 1)");
     auto columns = db->execSqlSync("PRAGMA table_info(pastes)");
     const std::vector<std::pair<std::string, std::string>> additions = {
         {"expires_at", "DATETIME"}, {"password_hash", "TEXT"},
         {"burn_after_read", "INTEGER DEFAULT 0"}, {"visibility", "TEXT DEFAULT 'public'"},
-        {"parent_id", "TEXT"}, {"owner_hash", "TEXT"}, {"updated_at", "DATETIME"}
+        {"parent_id", "TEXT"}, {"owner_hash", "TEXT"}, {"updated_at", "DATETIME"},
+        {"revision", "INTEGER NOT NULL DEFAULT 1"}
     };
     for (const auto &[name, type] : additions) {
         bool found = false;
@@ -29,6 +30,14 @@ void initDatabase() {
     }
     db->execSqlSync("CREATE TABLE IF NOT EXISTS tags (paste_id TEXT NOT NULL, tag TEXT NOT NULL,"
                     "PRIMARY KEY(paste_id,tag), FOREIGN KEY(paste_id) REFERENCES pastes(id) ON DELETE CASCADE)");
+    db->execSqlSync("CREATE TABLE IF NOT EXISTS paste_revisions ("
+        "paste_id TEXT NOT NULL, revision INTEGER NOT NULL, title TEXT NOT NULL, content TEXT NOT NULL,"
+        "language TEXT NOT NULL, tags_json TEXT NOT NULL, saved_at DATETIME NOT NULL,"
+        "PRIMARY KEY(paste_id,revision), FOREIGN KEY(paste_id) REFERENCES pastes(id) ON DELETE CASCADE)");
+    // Keep lifecycle cleanup active even for an operator/legacy connection that
+    // has not enabled SQLite's connection-local foreign_keys pragma.
+    db->execSqlSync("CREATE TRIGGER IF NOT EXISTS delete_paste_metadata AFTER DELETE ON pastes BEGIN "
+        "DELETE FROM tags WHERE paste_id=OLD.id; DELETE FROM paste_revisions WHERE paste_id=OLD.id; END");
     db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_expires ON pastes(expires_at)");
     db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_public_created ON pastes(visibility,created_at DESC,id)");
     db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag,paste_id)");
@@ -50,7 +59,7 @@ int main() {
             auto response = drogon::HttpResponse::newHttpResponse();
             response->setStatusCode(drogon::k204NoContent);
             response->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-            response->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password, X-Owner-Token, X-Requested-With, X-Confirm-Burn");
+            response->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password, X-Owner-Token, X-Requested-With, X-Confirm-Burn, If-Match");
             response->addHeader("Access-Control-Max-Age", "600");
             callback(response); return;
         }

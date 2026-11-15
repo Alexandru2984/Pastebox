@@ -7,6 +7,7 @@ Live: [pastebox.micutu.com](https://pastebox.micutu.com/)
 ## What you can do
 
 - Create, edit, delete and fork snippets; copy, share and download them.
+- Keep up to 10 owner-only earlier versions, compare changes, restore a snapshot or clear saved history. Concurrent edits cannot silently overwrite a newer revision.
 - Explore public titles/tags with search, language/tag filters and newest/oldest/most-viewed sorting.
 - Keep owned snippets and favorites in a browser-local library; verify/import an owner key on another browser.
 - Write with starter templates, text-file import, JSON formatting, Tab indentation, word wrap, UTF-8 byte counts and optional public draft recovery.
@@ -63,7 +64,7 @@ PASTEBOX_TEST_PUBLIC=/tmp/pastebox-public npm run test:e2e
 
 The Python API suite always creates its own server/database. It does not accept a remote base URL. `backend/test.sh /path/to/test-build/backend` runs this same isolated suite; the old production-default shell tests have been replaced. Playwright starts another disposable backend on loopback port 19779 and runs desktop/mobile workflows.
 
-Current suites: 74 frontend cases, 19 API security/lifecycle cases and 10 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
+Current suites: 85 frontend cases, 26 API security/lifecycle cases and 14 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
 
 GitHub Actions performs clean installs, hardened C++ build, API regressions, frontend tests/build, dependency audit and browser flows. Actions are pinned to commit SHAs; credentials are read-only and there is no deployment or production secret in CI. Dependabot opens weekly dependency update PRs. A workflow file is not evidence that remote CI has already run.
 
@@ -83,8 +84,16 @@ Mutations require `X-Requested-With: PasteBox` and JSON bodies where applicable.
 | GET | `/api/pastes/ID/embed` | Public, unprotected, reusable content only |
 | PUT | `/api/pastes/ID` | Owner-only title/content/language/visibility/tags update |
 | DELETE | `/api/pastes/ID` | Owner-only deletion |
+| GET | `/api/pastes/ID/revisions` | Owner-only history metadata (up to 10 previous versions) |
+| GET | `/api/pastes/ID/revisions/N` | Owner-only saved content/title/language/tags |
+| POST | `/api/pastes/ID/revisions/N/restore` | Restore as a new revision, preserving current access/expiry |
+| DELETE | `/api/pastes/ID/revisions` | Clear historical snapshots; current content is kept |
 | POST | `/api/pastes/ID/fork` | New owner key; inherited privacy/password/expiry |
 | GET | `/api/health` | Database readiness, no private aggregate counts |
+
+Edits, restoration and history clearing require `If-Match` with the current JSON read's `ETag` (for example `"paste-ID-v3"`). The JSON `revision` also identifies the current head. Missing preconditions return `428`; a stale head returns `412` without applying changes. Read counters do not invalidate edits. The browser keeps unsaved text on conflicts. Older clients must reload before saving.
+
+Each successful edit stores the prior title/content/language/tags. History is owner-only even when current content is public. Restoring never rolls back passwords, owner keys, visibility or expiry. One-time pastes cannot be edited and never retain snapshots; forks start with empty history. Deletion/expiration cleans historical rows. Clearing history removes active rows; backups and SQLite storage pages may retain older bytes.
 
 Create fields: `content`, `title`, `language`, `visibility`, `password`, `expires_in` (`1h`, `24h`, `7d`, `30d` or empty), `burn_after_read`, `tags`. Content limit: 512 KiB **UTF-8 bytes**; title: 200 bytes; tags: up to 10, each 50 bytes. The 4 MiB transport limit allows JSON escaping overhead. Reading passwords have a compatibility minimum of 4 bytes; use a long, unique passphrase.
 

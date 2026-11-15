@@ -50,9 +50,10 @@ export async function listPastes(tag = '', page = 1, limit = 50, filters = {}) {
   return res.json();
 }
 
-export async function updatePaste(id, data, password = '') {
+export async function updatePaste(id, data, password = '', revision = null) {
   const headers = withOwner(id, { 'Content-Type': 'application/json', ...CSRF_HEADERS });
   if (password) headers['X-Password'] = password;
+  if (Number.isInteger(revision) && revision > 0) headers['If-Match'] = revisionTag(id, revision);
   const res = await fetch(`${BASE}/api/pastes/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers,
@@ -61,6 +62,7 @@ export async function updatePaste(id, data, password = '') {
   const json = await res.json();
   if (!res.ok) {
     const err = new Error(json.error || 'Failed to update paste');
+    err.status = res.status;
     err.passwordRequired = json.password_required || false;
     err.ownerRequired = json.owner_required || false;
     err.burnRequired = json.burn_confirmation_required || false;
@@ -120,3 +122,21 @@ export async function getEmbedPaste(id) {
   if (!res.ok) throw new Error(json.error || 'This paste cannot be embedded');
   return json;
 }
+
+function revisionTag(id, revision) { return `"paste-${id}-v${revision}"`; }
+async function revisionRequest(id, path = '', { method = 'GET', revision = null, data } = {}) {
+  const headers = withOwner(id);
+  if (revision !== null) headers['If-Match'] = revisionTag(id,revision);
+  if (data !== undefined) {headers['Content-Type'] = 'application/json';Object.assign(headers,CSRF_HEADERS);}
+  if (method === 'DELETE') Object.assign(headers,CSRF_HEADERS);
+  const options = {method,headers};
+  if (data !== undefined) options.body = JSON.stringify(data);
+  const res = await fetch(`/api/pastes/${encodeURIComponent(id)}/revisions${path}`,options);
+  const json = await res.json();
+  if (!res.ok) throw Object.assign(new Error(json.error || 'History request failed'),{status:res.status});
+  return json;
+}
+export function listRevisions(id) {return revisionRequest(id);}
+export function getRevision(id, number) {return revisionRequest(id,`/${encodeURIComponent(number)}`);}
+export function restoreRevision(id, number, revision) {return revisionRequest(id,`/${encodeURIComponent(number)}/restore`,{method:'POST',revision,data:{}});}
+export function clearRevisions(id, revision) {return revisionRequest(id,'',{method:'DELETE',revision});}

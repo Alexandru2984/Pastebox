@@ -67,7 +67,7 @@ class API(unittest.TestCase):
         for method, data in [('PUT', {'title': 'hijacked'}), ('DELETE', None)]:
             self.assertEqual(self.request(path, method, data)[0], 403)
             self.assertEqual(self.request(path, method, data, token='f'*64)[0], 403)
-        self.assertEqual(self.request(path, 'PUT', {'title': 'owned'}, token=paste['owner_token'])[0], 200)
+        self.assertEqual(self.request(path, 'PUT', {'title': 'owned'}, token=paste['owner_token'],headers={'If-Match':f'"paste-{paste["id"]}-v1"'})[0], 200)
         self.assertEqual(self.request(path)[1]['title'], 'owned')
         self.assertEqual(self.request(path, 'DELETE', token=paste['owner_token'])[0], 200)
         self.assertEqual(self.request(path)[0], 404)
@@ -126,12 +126,12 @@ class API(unittest.TestCase):
     def test_duplicate_tags_commit_and_invalid_tags_do_not_mutate(self):
         paste = self.create(tags=['x','x','y'])
         path = '/api/pastes/' + paste['id']
-        self.assertEqual(self.request(path,'PUT',{'tags':['z','z']},token=paste['owner_token'])[0],200)
+        self.assertEqual(self.request(path,'PUT',{'tags':['z','z']},token=paste['owner_token'],headers={'If-Match':f'"paste-{paste["id"]}-v1"'})[0],200)
         self.assertEqual(self.request(path)[1]['tags'],['z'])
         for tags in [[{}], [''], ['a']*11, ['bad,tag'], ['bad\x01tag']]:
             self.assertEqual(self.request(path,'PUT',{'title':'bad','tags':tags},token=paste['owner_token'])[0],400)
         self.assertNotEqual(self.request(path)[1]['title'],'bad')
-        self.assertEqual(self.request(path,'PUT',{'tags':[]},token=paste['owner_token'])[0],200)
+        self.assertEqual(self.request(path,'PUT',{'tags':[]},token=paste['owner_token'],headers={'If-Match':f'"paste-{paste["id"]}-v2"'})[0],200)
 
     def test_json_type_validation(self):
         for body in [[], 1, {'content':{}}, {'content':'ok','burn_after_read':{}},
@@ -231,6 +231,124 @@ class API(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertNotIn('X-Frame-Options',headers)
         self.assertIn('frame-ancestors *',headers['Content-Security-Policy'])
+
+    def test_revision_preconditions_prevent_lost_updates(self):
+        paste = self.create(content='original')
+        path = '/api/pastes/'+paste['id']
+        token = paste['owner_token']
+        code, body, headers = self.request(path,token=token)
+        self.assertEqual(body['revision'],1)
+        tag = headers['ETag']
+        self.assertEqual(self.request(path,'PUT',{'content':'missing guard'},token=token)[0],428)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda text: self.request(path,'PUT',{'content':text},token=token,headers={'If-Match':tag})[0], ['first tab','second tab']))
+        self.assertEqual(sorted(results),[200,412])
+        self.assertEqual(self.request(path,token=token)[1]['revision'],2)
+        code, history, _ = self.request(path+'/revisions',token=token)
+        self.assertEqual(code,200)
+        self.assertEqual([r['revision'] for r in history['data']],[1])
+        self.assertEqual(self.request(path+'/revisions/1',token=token)[1]['content'],'original')
+
+    def test_history_requires_owner_and_never_leaks_credentials(self):
+        paste = self.create(content='old secret',password='read pass')
+        path = '/api/pastes/'+paste['id']
+        token = paste['owner_token']
+        self.assertEqual(self.request(path,'PUT',{'content':'redacted'},token=token,headers={'If-Match':f'"paste-{paste["id"]}-v1"'})[0],200)
+        for suffix, method, data in [('/revisions','GET',None),('/revisions/1','GET',None),('/revisions/1/restore','POST',{}),('/revisions','DELETE',None)]:
+            self.assertEqual(self.request(path+suffix,method,data,password='read pass')[0],403)
+        meta = self.request(path+'/revisions',token=token)[1]
+        self.assertNotIn('old secret',json.dumps(meta))
+        saved = self.request(path+'/revisions/1',token=token)[1]
+        self.assertEqual(saved['content'],'old secret')
+        for key in ['password_hash','owner_hash','owner_token','visibility','expires_at']:
+            self.assertNotIn(key,saved)
+        self.assertEqual(self.request(path+'/revisions/1abc',token=token)[0],404)
+
+    def test_restore_creates_new_revision_and_preserves_current_protection(self):
+        paste = self.create(content='original',language='python',visibility='private',password='read pass',expires_in='1h',tags=['original'])
+        path = '/api/pastes/'+paste['id']
+        token = paste['owner_token']
+        self.assertEqual(self.request(path,'PUT',{'content':'new','language':'json','tags':['new'],'visibility':'unlisted'},token=token,headers={'If-Match':f'"paste-{paste["id"]}-v1"'})[0],200)
+        route = path+'/revisions/1/restore'
+        self.assertEqual(self.request(route,'POST',{},token=token,headers={'If-Match':f'"paste-{paste["id"]}-v1"'})[0],412)
+        code, restored, _ = self.request(route,'POST',{},token=token,headers={'If-Match':f'"paste-{paste["id"]}-v2"'})
+        self.assertEqual(code,200)
+        self.assertEqual(restored['revision'],3)
+        self.assertEqual(restored['visibility'],'unlisted')
+        self.assertEqual(restored['expires_at'],paste['expires_at'])
+        self.assertTrue(restored['has_password'])
+        current = self.request(path,password='read pass')[1]
+        self.assertEqual(current['content'],'original')
+        self.assertEqual(current['language'],'python')
+        self.assertEqual(current['tags'],['original'])
+        self.assertEqual(self.request(path+'/revisions/2',token=token)[1]['content'],'new')
+
+    def test_history_retention_clear_and_lifecycle(self):
+        paste = self.create()
+        path = '/api/pastes/'+paste['id']
+        token = paste['owner_token']
+        for revision in range(1,13):
+            if revision == 7:
+                self.ip = f'198.51.100.{API.sequence}'
+            code, _, _ = self.request(path,'PUT',{'content':f'content {revision}'},token=token,headers={'If-Match':f'"paste-{paste["id"]}-v{revision}"'})
+            self.assertEqual(code,200)
+        history = self.request(path+'/revisions',token=token)[1]
+        self.assertEqual(len(history['data']),10)
+        self.assertEqual(history['current_revision'],13)
+        self.assertEqual(self.request(path+'/revisions/1',token=token)[0],404)
+        self.assertEqual(self.request(path+'/revisions','DELETE',token=token,headers={'If-Match':f'"paste-{paste["id"]}-v12"'})[0],412)
+        self.assertEqual(self.request(path+'/revisions','DELETE',token=token,headers={'If-Match':f'"paste-{paste["id"]}-v13"'})[0],200)
+        self.assertEqual(self.request(path+'/revisions',token=token)[1]['data'],[])
+        self.assertEqual(self.request(path,token=token)[1]['content'],'content 12')
+        self.assertEqual(self.request(path,'PUT',{'title':'kept'},token=token,headers={'If-Match':f'"paste-{paste["id"]}-v13"'})[0],200)
+        self.assertEqual(self.request(path,'DELETE',token=token)[0],200)
+        with sqlite3.connect(self.database) as connection:
+            count = connection.execute('SELECT count(*) FROM paste_revisions WHERE paste_id=?',(paste['id'],)).fetchone()[0]
+        self.assertEqual(count,0)
+
+    def test_one_time_history_disabled_and_forks_start_fresh(self):
+        paste = self.create(burn_after_read=True)
+        path = '/api/pastes/'+paste['id']
+        token = paste['owner_token']
+        self.assertEqual(self.request(path+'/revisions',token=token)[0],409)
+        self.assertEqual(self.request(path,'PUT',{'content':'another copy'},token=token,headers={'If-Match':f'"paste-{paste["id"]}-v1"'})[0],409)
+        self.assertEqual(self.request(path,token=token,headers={'X-Confirm-Burn':'yes'})[1]['content'],'hello secret')
+        regular = self.create()
+        route = '/api/pastes/'+regular['id']
+        self.assertEqual(self.request(route,'PUT',{'content':'new'},token=regular['owner_token'],headers={'If-Match':f'"paste-{regular["id"]}-v1"'})[0],200)
+        code, fork, _ = self.request(route+'/fork','POST',{})
+        self.assertEqual(code,201)
+        self.assertEqual(fork['revision'],1)
+        self.assertEqual(self.request('/api/pastes/'+fork['id']+'/revisions',token=fork['owner_token'])[1]['data'],[])
+        self.assertEqual(self.request(route+'/revisions/1',token=fork['owner_token'])[0],403)
+
+    def test_expired_history_is_inaccessible_and_cascades(self):
+        paste = self.create()
+        path = '/api/pastes/'+paste['id']
+        self.assertEqual(self.request(path,'PUT',{'content':'new'},token=paste['owner_token'],headers={'If-Match':f'"paste-{paste["id"]}-v1"'})[0],200)
+        with sqlite3.connect(self.database) as connection:
+            connection.execute("UPDATE pastes SET expires_at=datetime('now','-1 second') WHERE id=?",(paste['id'],))
+        self.assertEqual(self.request(path+'/revisions/1',token=paste['owner_token'])[0],404)
+        with sqlite3.connect(self.database) as connection:
+            connection.execute('PRAGMA foreign_keys=OFF')
+            connection.execute("DELETE FROM pastes WHERE expires_at<=datetime('now')")
+            self.assertEqual(connection.execute('SELECT count(*) FROM paste_revisions WHERE paste_id=?',(paste['id'],)).fetchone()[0],0)
+
+    def test_failed_tag_write_rolls_back_content_and_snapshot(self):
+        paste = self.create(content='keep original',tags=['keep'])
+        path = '/api/pastes/'+paste['id']
+        with sqlite3.connect(self.database) as connection:
+            connection.execute(f"CREATE TRIGGER fail_revision_fixture BEFORE INSERT ON tags WHEN NEW.paste_id='{paste['id']}' BEGIN SELECT RAISE(ABORT,'fixture'); END")
+        try:
+            self.assertEqual(self.request(path,'PUT',{'content':'partial change','tags':['new']},token=paste['owner_token'],headers={'If-Match':f'"paste-{paste["id"]}-v1"'})[0],503)
+            current = self.request(path,token=paste['owner_token'])[1]
+            self.assertEqual(current['revision'],1)
+            self.assertEqual(current['content'],'keep original')
+            self.assertEqual(current['tags'],['keep'])
+            self.assertEqual(self.request(path+'/revisions',token=paste['owner_token'])[1]['data'],[])
+        finally:
+            with sqlite3.connect(self.database) as connection:
+                connection.execute('DROP TRIGGER fail_revision_fixture')
 
     def test_forged_forwarded_for_does_not_bypass_limiter(self):
         codes = []

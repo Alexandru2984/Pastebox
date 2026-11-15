@@ -75,3 +75,16 @@ Pending wider product work remains listed above: cross-device accounts, encrypti
 ## Production status
 
 This release is live. See [release verification and residual work](RELEASE-2026-11-15.md). The checked-in roadmap distinguishes delivered functionality from the next product/security increments; remote CI still requires a push.
+
+## Next release in progress: revision history and safe reading
+
+1. Owner-only bounded revision history, comparison and restore; content edits require an exact current revision so two tabs cannot silently overwrite one another.
+2. Historical snapshots contain title/content/language/tags only. Access controls, passwords and expiration remain current; one-time pastes never create reusable snapshots. Deletion/expiration removes history through the same foreign-key lifecycle.
+3. Lazy, sandboxed Markdown preview without raw HTML or remote image requests, with browser XSS/privacy regressions.
+4. Repeat isolated API/frontend/browser checks, back up and deploy the tested artifacts, then verify the public site read-only.
+
+No cross-device account, off-host backup destination or remote push is assumed by this increment.
+
+### Revision stage delivered
+
+Implemented owner-only bounded history, line comparison with a large-file fallback, restore as a new head, explicit history clearing and optimistic edit preconditions. Current privacy/expiry are preserved on restore, one-time pastes remain snapshot-free, and stale editor content remains available after conflicts. API and browser regressions run only on disposable data.

@@ -163,3 +163,17 @@ it('waits for explicit confirmation before revealing a one-time paste', async ()
   await screen.findByText('Test Paste');
   expect(getPaste).toHaveBeenLastCalledWith('oneTime', '', true);
 });
+
+it('keeps unsaved edits when another tab has changed the server version', async () => {
+  vi.clearAllMocks();
+  getPaste.mockResolvedValueOnce({ ...mockPaste, revision: 1 });
+  updatePaste.mockRejectedValueOnce(Object.assign(new Error('A newer version was saved'), { status: 412 }));
+  render(PasteView, { props: { pasteId: 'conflictCase' } });
+  await fireEvent.click(await screen.findByRole('button', { name: 'Edit paste', exact: true }));
+  const editor = screen.getByRole('textbox', { name: 'Content', exact: true });
+  await fireEvent.input(editor, { target: { value: 'my unsaved work' } });
+  await fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+  await screen.findByText(/Another tab saved a newer version/);
+  expect(editor.value).toBe('my unsaved work');
+  expect(updatePaste.mock.lastCall[3]).toBe(1);
+});

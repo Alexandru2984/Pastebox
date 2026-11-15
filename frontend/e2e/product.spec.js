@@ -104,3 +104,42 @@ test('password readers can unlock and download without receiving edit access', a
   expect(download.suggestedFilename()).toBe('Read-only password test.js');
   await visitor.close();
 });
+
+test('owners compare, restore and clear history without exposing it to readers', async ({page}) => {
+  await create(page,{title:'Revision browser flow',content:'const value = 1;'});
+  await page.getByRole('button',{name:'Edit paste',exact:true}).click();
+  await page.getByRole('textbox',{name:'Content',exact:true}).fill('const value = 2;');
+  await page.getByRole('button',{name:'Save Changes',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Code content'})).toHaveText('const value = 2;');
+  await page.getByRole('button',{name:'Version history',exact:true}).click();
+  await page.getByRole('button',{name:'View version 1',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Line changes'})).toContainText('const value = 1;');
+  await expect(page.getByRole('textbox',{name:'Line changes'})).toContainText('const value = 2;');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button',{name:'Restore v1',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Code content'})).toHaveText('const value = 1;');
+  await page.getByRole('button',{name:'Version history',exact:true}).click();
+  await expect(page.getByText('Current v3',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Clear saved history',exact:true}).click();
+  await page.getByRole('button',{name:'Clear history permanently',exact:true}).click();
+  await expect(page.getByText(/No earlier versions yet/)).toBeVisible();
+});
+
+test('a stale browser tab preserves its text when saving is rejected', async ({page,context}) => {
+  const url = await create(page,{title:'Two tab flow'});
+  const other = await context.newPage();
+  await other.route('https://**/*',route => route.abort());
+  await other.goto(url);
+  await other.getByRole('button',{name:'Edit paste',exact:true}).click();
+  await other.getByRole('textbox',{name:'Content',exact:true}).fill('my unsaved second-tab work');
+  await page.getByRole('button',{name:'Edit paste',exact:true}).click();
+  await page.getByRole('textbox',{name:'Content',exact:true}).fill('first tab saved this');
+  await page.getByRole('button',{name:'Save Changes',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Code content'})).toHaveText('first tab saved this');
+  await other.getByRole('button',{name:'Save Changes',exact:true}).click();
+  await expect(other.getByText(/Another tab saved a newer version/)).toBeVisible();
+  await expect(other.getByRole('textbox',{name:'Content',exact:true})).toHaveValue('my unsaved second-tab work');
+  await page.reload();
+  await expect(page.getByRole('textbox',{name:'Code content'})).toHaveText('first tab saved this');
+  await other.close();
+});

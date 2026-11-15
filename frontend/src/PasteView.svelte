@@ -7,12 +7,14 @@
   import { validatePaste } from './lib/editor.js';
   import { success, error as toastError } from './lib/toast.js';
   import CodeBlock from './CodeBlock.svelte';
+  import RevisionHistory from './RevisionHistory.svelte';
   import Icon from './Icon.svelte';
   export let pasteId;
   const dispatch = createEventDispatcher();
   let paste = null, loading = true, error = '', passwordRequired = false, ownerRequired = false, burnRequired = false;
   let passwordInput = '', currentPassword = '', ownerInput = '', passwordInputEl, copied = false, copyTimer;
   let editing = false, editTitle = '', editContent = '', editLanguage = '', editVisibility = '', editTags = '', saving = false, forking = false, deleting = false;
+  let historyOpen = false, editConflict = false;
   let favorite = false, wrap = false, showLines = true, fontSize = 13, deleteDialog, requestNumber = 0;
   const urls = new Set();
   $: if (pasteId) loadPaste();
@@ -64,7 +66,7 @@
     try { const result = await forkPaste(pasteId,{},currentPassword); success('Fork created with the original privacy and expiration.'); dispatch('navigate',{view:'view',id:result.id}); } catch (e) { toastError(e.message); } finally { forking = false; }
   }
   function startEdit() {
-    editTitle = paste.title; editContent = paste.content; editLanguage = paste.language; editVisibility = paste.visibility; editTags = (paste.tags || []).join(', '); editing = true;
+    editTitle = paste.title; editContent = paste.content; editLanguage = paste.language; editVisibility = paste.visibility; editTags = (paste.tags || []).join(', '); editing = true; editConflict = false; historyOpen = false;
   }
   async function saveEdit() {
     if (saving) return;
@@ -72,9 +74,16 @@
     if (invalid) { toastError(invalid); return; }
     saving = true;
     try {
-      await updatePaste(pasteId,{title:editTitle,content:editContent,language:editLanguage,visibility:editVisibility,tags:[...new Set(editTags.split(',').map(tag => tag.trim()).filter(Boolean))]});
+      await updatePaste(pasteId,{title:editTitle,content:editContent,language:editLanguage,visibility:editVisibility,tags:[...new Set(editTags.split(',').map(tag => tag.trim()).filter(Boolean))]}, '', paste.revision);
       editing = false; success('Changes saved.'); await loadPaste();
-    } catch (e) { toastError(e.message); } finally { saving = false; }
+    } catch (e) { editConflict = e.status === 412; toastError(e.message); } finally { saving = false; }
+  }
+  async function copyUnsaved() {
+    try {await copyText(editContent);success('Your unsaved content was copied.');} catch (e) {toastError(e.message);}
+  }
+  function reloadLatest() {
+    if (editing && !window.confirm('Discard your unsaved edits and load the latest version? Copy your changes first if you need them.')) return;
+    editing = false; historyOpen = false; editConflict = false; loadPaste();
   }
   async function removePaste() {
     if (deleting) return;
@@ -96,10 +105,11 @@
     {#if paste.expires_at}<p class="field-hint">Expires {parseDate(paste.expires_at).toLocaleString()}</p>{/if}
     {#if paste.parent_id}<a class="text-button" href="#/paste/{paste.parent_id}"><Icon name="fork" size={12}/> Forked from {paste.parent_id}</a>{/if}
     <div class="viewer-toolbar" role="group" aria-label="Paste actions"><div><button class="button" on:click={copyContent} aria-label={copied ? 'Copied!' : 'Copy to clipboard'}><Icon name={copied ? 'check' : 'copy'} size={14}/>{copied ? 'Copied' : 'Copy'}</button><button class="button" on:click={share} aria-label="Copy share link">Share link <Icon name="arrow" size={13}/></button>{#if !paste.burned && !paste.burn_after_read}<button class="button" on:click={handleFork} disabled={forking} aria-label="Fork paste"><Icon name="fork" size={14}/>{forking ? 'Forking…' : 'Fork'}</button>{/if}</div><div>{#if !paste.has_password && paste.visibility !== 'private' && !paste.burned}<a href={getRawUrl(pasteId)} target="_blank" rel="noopener noreferrer" class="button" aria-label="View raw paste">Raw</a>{:else}<button class="button" on:click={openRaw} aria-label="View raw paste">Raw</button>{/if}<button class="button" on:click={download} aria-label="Download paste as file"><Icon name="download" size={14}/> Download</button></div></div>
-    {#if editing}<form class="panel edit-panel" on:submit|preventDefault={saveEdit} aria-label="Edit paste"><div class="panel-heading"><span class="panel-label"><Icon name="code" size={16}/> Edit your paste</span></div><div class="edit-fields"><label class="field"><span>Title</span><input bind:value={editTitle} maxlength="200"/></label><div class="form-row"><label class="field"><span>Language</span><select bind:value={editLanguage}>{#each LANGUAGES as lang}<option value={lang}>{lang}</option>{/each}</select></label><label class="field"><span>Visibility</span><select bind:value={editVisibility}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label></div><label class="field"><span>Tags</span><input bind:value={editTags} maxlength="500"/></label><label class="field"><span>Content</span><textarea bind:value={editContent} rows="18" spellcheck="false" on:keydown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {event.preventDefault();saveEdit();} }}></textarea></label><div class="form-row"><button type="button" class="button" on:click={() => editing = false} disabled={saving}>Cancel</button><button class="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button></div></div></form>
+    {#if editing}<form class="panel edit-panel" on:submit|preventDefault={saveEdit} aria-label="Edit paste"><div class="panel-heading"><span class="panel-label"><Icon name="code" size={16}/> Edit your paste</span></div><div class="edit-fields">{#if editConflict}<div class="notice warning" role="alert">Another tab saved a newer version. Your edits are still here and have not overwritten it.<div class="form-row"><button type="button" class="text-button" on:click={copyUnsaved}>Copy my edits</button><button type="button" class="text-button" on:click={reloadLatest}>Load latest version</button></div></div>{/if}<p class="field-hint">Saving keeps up to 10 earlier versions for your owner key. You can clear them from Version history.</p><label class="field"><span>Title</span><input bind:value={editTitle} maxlength="200"/></label><div class="form-row"><label class="field"><span>Language</span><select bind:value={editLanguage}>{#each LANGUAGES as lang}<option value={lang}>{lang}</option>{/each}</select></label><label class="field"><span>Visibility</span><select bind:value={editVisibility}><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></label></div><label class="field"><span>Tags</span><input bind:value={editTags} maxlength="500"/></label><label class="field"><span>Content</span><textarea bind:value={editContent} rows="18" spellcheck="false" on:keydown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {event.preventDefault();saveEdit();} }}></textarea></label><div class="form-row"><button type="button" class="button" on:click={() => editing = false} disabled={saving}>Cancel</button><button class="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button></div></div></form>
     {:else}<section class="panel code-panel" aria-label="Paste content"><div class="panel-heading"><span class="panel-label"><Icon name="code" size={15}/>{paste.content.split('\n').length} lines<span class="muted">· {paste.id}</span></span><div class="code-controls"><button class="text-button" aria-label="Toggle word wrap" aria-pressed={wrap} on:click={() => wrap = !wrap}><Icon name="wrap" size={14}/> Wrap</button><button class="text-button" aria-label="Toggle line numbers" aria-pressed={showLines} on:click={() => showLines = !showLines}># Lines</button><button class="text-button" aria-label="Decrease code font size" on:click={() => fontSize = Math.max(11,fontSize-1)}>A−</button><button class="text-button" aria-label="Increase code font size" on:click={() => fontSize = Math.min(20,fontSize+1)}>A+</button></div></div><CodeBlock content={paste.content} language={paste.language} {wrap} {showLines} {fontSize}/></section>{/if}
     {#if paste.tags?.length}<div class="tag-list viewer-tags" role="list" aria-label="Tags">{#each paste.tags as tag}<span class="tag" role="listitem">#{tag}</span>{/each}</div>{/if}
-    {#if paste.can_manage && !paste.burned}<div class="owner-panel"><span><Icon name="key" size={15}/> This paste is yours. Keep your owner key safe.</span><div><button class="text-button" on:click={copyOwnerKey}>Copy owner key</button><button class="button small" on:click={startEdit} aria-label="Edit paste">Edit paste</button><button class="text-button error-text" on:click={() => deleteDialog.showModal()} aria-label="Delete paste">Delete</button></div></div>{/if}
+    {#if paste.can_manage && !paste.burned}<div class="owner-panel"><span><Icon name="key" size={15}/> This paste is yours. Keep your owner key safe.</span><div><button class="text-button" on:click={() => historyOpen = !historyOpen} aria-expanded={historyOpen} disabled={editing}>Version history</button><button class="text-button" on:click={copyOwnerKey}>Copy owner key</button><button class="button small" on:click={startEdit} aria-label="Edit paste">Edit paste</button><button class="text-button error-text" on:click={() => deleteDialog.showModal()} aria-label="Delete paste">Delete</button></div></div>{/if}
+    {#if historyOpen && !editing && paste.can_manage && !paste.burned}<RevisionHistory {paste} on:close={() => historyOpen = false} on:reload={reloadLatest} on:restored={() => {historyOpen = false;loadPaste();}}/>{/if}
     {#if !paste.has_password && paste.visibility === 'public' && !paste.burned && !paste.burn_after_read}<details class="embed-snippet"><summary>Embed this snippet</summary><p class="field-hint">This public snippet can be displayed on another page. Protected and one-time content cannot be embedded.</p><code>&lt;iframe src="{window.location.origin}/embed/{paste.id}" title="PasteBox snippet" width="100%" height="400" loading="lazy"&gt;&lt;/iframe&gt;</code></details>{/if}
     <dialog bind:this={deleteDialog} aria-labelledby="delete-title"><h2 id="delete-title">Delete this paste?</h2><p class="muted">The paste and its tags will be permanently deleted. This cannot be undone.</p><div class="form-row"><button class="button" on:click={() => deleteDialog.close()} disabled={deleting}>Keep paste</button><button class="button danger" on:click={removePaste} disabled={deleting}>{deleting ? 'Deleting…' : 'Permanently delete'}</button></div></dialog>
   </article>

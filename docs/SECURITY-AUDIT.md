@@ -70,3 +70,11 @@ ShellCheck, shell/Python syntax, workflow YAML parsing, lockfile consistency, `g
 ## Production result
 
 The release was installed with an online snapshot and verified local restore. Public curl/browser checks passed through Cloudflare, including strict API cache/robots/CSP behavior and public-only embed framing. A non-Cloudflare direct origin request was refused. Nginx proxy/header inheritance was checked and duplicate security headers were removed. Active pre-release records and database integrity were verified without reading customer bodies. The artifact matches the tested build; there were no automatic service restarts. Details and remaining limitations are recorded in [the release report](RELEASE-2026-11-15.md).
+
+## Continuation: revision history and concurrent saves
+
+A bounded `paste_revisions` table stores only earlier title/content/language/tags, never access credentials or historical visibility/expiry. Every history endpoint verifies the current owner capability; read passwords and fork ownership do not grant source-history access. `If-Match` is mandatory on edits/restores/history clearing, and checks run in the same SQLite transaction as the snapshot/update. A stale save returns 412 while the UI keeps its unsaved editor buffer.
+
+History is limited to 10 prior snapshots per paste under the existing database ceiling. One-time pastes cannot be edited or snapshotted. Foreign keys and a persistent delete trigger remove metadata/history on deletion, including cleanup issued from a connection without the connection-local foreign-key pragma. Expired history is inaccessible immediately. Clearing history is logical deletion; prior backups/free SQLite pages remain outside its erasure guarantee. Restoring creates a new revision and keeps the current protection and expiration.
+
+Verification adds concurrent conditional writes (one success/one conflict), owner/read-password/fork isolation, retention, restore protection preservation, deletion/expiry cascade and injected tag-write failure to prove transaction rollback of both current content and historical snapshot. Frontend/browser checks cover bounded diff work, stale editor preservation and desktop/mobile compare/restore/clear flows.
