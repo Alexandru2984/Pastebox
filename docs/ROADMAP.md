@@ -59,3 +59,9 @@ Avoid launching comments, executable code previews, arbitrary URL imports or ano
 Explore now searches titles/tags and filters language/tag with stable newest/oldest/popular ordering. Browser library supports favorites, local owner capabilities and verified key restoration without revealing one-time content. New responsive application shell, native accessible theme picker, error retry states and semantic cards replace nested controls.
 
 The composer adds starter templates, text/code file import, JSON formatting, UTF-8 byte validation, guarded submission, word wrap, Tab indentation with an Escape exit, and explicit public-only draft persistence. Protected/unlisted/one-time content is excluded from draft storage. No cross-device account or end-to-end encryption is claimed.
+
+## Delivered viewer and browser validation stage
+
+Viewer includes immediate visible content, lazy per-language syntax highlighting, wrapping/line-number/font-size controls, browser favorites, safe filename downloads, owner-only edit/delete and a delete confirmation dialog. Private key restoration verifies against a metadata-only ownership endpoint. Public-only embed has a dedicated API which refuses private, unlisted, password-protected and one-time content even when an owner key is supplied. Public embed documents alone allow external framing.
+
+Initial JS reduced from about 1,011 KB / 341 KB gzip to 125 KB / 47 KB gzip; language chunks load on demand. Plain text/large payloads skip expensive automatic highlighting and large line counts do not create one DOM node per line. Desktop and mobile browser flows cover CRUD, actual highlighted content, privacy, owner recovery, one-time reveal, draft exclusion, file import, JSON formatting, themes and 320px layout fit.

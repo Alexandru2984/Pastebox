@@ -11,6 +11,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.9.1",

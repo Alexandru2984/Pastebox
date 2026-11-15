@@ -77,12 +77,13 @@ int main() {
         response->addHeader("Referrer-Policy", "no-referrer");
         response->addHeader("Strict-Transport-Security", "max-age=31536000");
         response->addHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-        response->addHeader("X-Frame-Options", "SAMEORIGIN");
+        const bool embedded = req->path().rfind("/embed/",0) == 0;
+        if (!embedded) response->addHeader("X-Frame-Options", "SAMEORIGIN");
         response->addHeader("Content-Security-Policy",
             "default-src 'self'; script-src 'self' https://analytics.micutu.com https://static.cloudflareinsights.com; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
             "connect-src 'self' https://analytics.micutu.com https://cloudflareinsights.com; "
-            "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'");
+            "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors " + std::string(embedded ? "*" : "'self'"));
         if (req->path().rfind("/api/", 0) == 0) {
             response->addHeader("Cache-Control", "no-store");
             response->addHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
@@ -92,6 +93,12 @@ int main() {
             response->addHeader("Cache-Control", "no-cache");
         }
     });
+    drogon::app().registerHandler("/embed/{id}", [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback, const std::string &id) {
+        if (id.size() > 64 || id.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") != std::string::npos) {
+            callback(security::error(drogon::k404NotFound,"Not found")); return;
+        }
+        callback(drogon::HttpResponse::newFileResponse(drogon::app().getDocumentRoot() + "/index.html"));
+    }, {drogon::Get});
     drogon::app().setCustom404Page(security::error(drogon::k404NotFound, "Resource not found"), false);
     drogon::app().getLoop()->runEvery(60, [] {
         drogon::app().getDbClient()->execSqlAsync(

@@ -14,7 +14,7 @@
   let shortcuts;
 
   function parseHash() {
-    const hash = window.location.hash;
+    const hash = window.location.pathname.startsWith('/embed/') ? '#/embed/' + window.location.pathname.slice(7) : window.location.hash;
     const match = hash.match(/^#\/(paste|embed)\/([a-zA-Z0-9]{1,64})$/);
     if (match) { currentView = match[1] === 'paste' ? 'view' : 'embed'; currentId = match[2]; }
     else { currentView = hash === '#/list' ? 'list' : hash === '#/library' ? 'library' : 'create'; currentId = ''; }

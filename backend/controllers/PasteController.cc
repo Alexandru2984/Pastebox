@@ -354,3 +354,12 @@ void PasteController::ownership(const HttpRequestPtr &req, Callback &&callback, 
         auto json = serialize(row,db,false); json["can_manage"] = true; return response(json);
     });
 }
+
+void PasteController::embed(const HttpRequestPtr &, Callback &&callback, const std::string &id) {
+    handle(std::move(callback),[id] {
+        auto db = app().getDbClient(); auto row = find(db,id);
+        if (value(row,"visibility") != "public" || !value(row,"password_hash").empty() || row["burn_after_read"].as<int>() != 0)
+            fail(k404NotFound,"Only public, unprotected, reusable pastes can be embedded");
+        return response(serialize(row,db));
+    });
+}

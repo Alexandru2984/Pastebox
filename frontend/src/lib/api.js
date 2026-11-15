@@ -113,3 +113,10 @@ export async function restoreOwnerKey(id, token) {
   const saved = rememberPaste({ ...json, owner_token: token });
   return { ...json, owner_saved: saved };
 }
+
+export async function getEmbedPaste(id) {
+  const res = await fetch(`/api/pastes/${encodeURIComponent(id)}/embed`);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'This paste cannot be embedded');
+  return json;
+}

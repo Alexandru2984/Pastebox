@@ -221,6 +221,17 @@ class API(unittest.TestCase):
         result = self.request('/api/pastes/'+paste['id'])[1]
         self.assertEqual(result['size'],400)
 
+    def test_embed_refuses_all_protected_content(self):
+        for options in [{'visibility':'private'},{'visibility':'unlisted'},{'password':'read pass'},{'burn_after_read':True}]:
+            paste = self.create(**options)
+            self.assertEqual(self.request('/api/pastes/'+paste['id']+'/embed',token=paste['owner_token'])[0],404)
+        paste = self.create(content='<script>alert(1)</script>')
+        self.assertEqual(self.request('/api/pastes/'+paste['id']+'/embed')[1]['content'],'<script>alert(1)</script>')
+        status, _, headers = self.request('/embed/'+paste['id'])
+        self.assertEqual(status,200)
+        self.assertNotIn('X-Frame-Options',headers)
+        self.assertIn('frame-ancestors *',headers['Content-Security-Policy'])
+
     def test_forged_forwarded_for_does_not_bypass_limiter(self):
         codes = []
         for i in range(40):
