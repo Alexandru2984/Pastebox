@@ -1,43 +1,16 @@
-# Svelte + Vite
+# PasteBox frontend
 
-This template should help get you started developing with Svelte in Vite.
+Svelte 5, Vite and Tailwind. See the [project README](../README.md) for ownership/privacy semantics, the disposable backend preview, build prerequisites and deployment.
 
-## Recommended IDE Setup
-
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
-
-## Need an official Svelte framework?
-
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
-
-## Technical considerations
-
-**Why use this over SvelteKit?**
-
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
-
-This template contains as little as possible to get started with Vite + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
-
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `checkJs` in the JS template?**
-
-It is likely that most cases of changing variable types in runtime are likely to be accidental, rather than deliberate. This provides advanced typechecking out of the box. Should you like to take advantage of the dynamically-typed nature of JavaScript, it is trivial to change the configuration.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/sveltejs/svelte-hmr/tree/master/packages/svelte-hmr#preservation-of-local-state).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```js
-// store.js
-// An extremely simple external store
-import { writable } from 'svelte/store'
-export default writable(0)
+```bash
+npm ci
+npm test
+npm run build
+npm run dev
 ```
+
+Development/preview bind to loopback. The dev server forwards `/api` to `127.0.0.1:7777`; use a disposable backend when testing changes.
+
+Browser flows use `npm run test:e2e`; set `PASTEBOX_TEST_BINARY` and `PASTEBOX_TEST_PUBLIC` to the separately built C++ binary and frontend artifact. Playwright creates its own disposable database and backend. Install the browser first with `npx playwright install chromium`.
+
+The browser library stores owner keys and metadata locally. Do not add password/content persistence to it. Optional public drafts must continue excluding private, unlisted, password-protected and one-time content. API content is always displayed as text; syntax markup comes only from highlight.js. External embedding uses the restricted public embed API.

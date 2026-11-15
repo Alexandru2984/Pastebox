@@ -84,6 +84,7 @@ int main() {
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
             "connect-src 'self' https://analytics.micutu.com https://cloudflareinsights.com; "
             "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors " + std::string(embedded ? "*" : "'self'"));
+        if (embedded) response->addHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
         if (req->path().rfind("/api/", 0) == 0) {
             response->addHeader("Cache-Control", "no-store");
             response->addHeader("X-Robots-Tag", "noindex, nofollow, noarchive");

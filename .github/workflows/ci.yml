@@ -1,0 +1,57 @@
+name: Verify PasteBox
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install C++ prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake make g++ libdrogon-dev libpq-dev libmariadb-dev libbrotli-dev libhiredis-dev libc-ares-dev libyaml-cpp-dev libsqlite3-dev libssl-dev libjsoncpp-dev uuid-dev zlib1g-dev
+      - name: Build hardened API
+        run: |
+          cmake -S backend -B /tmp/pastebox-ci-build -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/pastebox-ci-build -j2
+          ctest --test-dir /tmp/pastebox-ci-build --output-on-failure
+      - name: Install and verify frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm audit --audit-level=moderate
+          npm audit --omit=dev --audit-level=low
+          npm run build -- --outDir /tmp/pastebox-ci-public
+      - name: Install test browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Verify desktop and mobile workflows
+        working-directory: frontend
+        env:
+          PASTEBOX_TEST_BINARY: /tmp/pastebox-ci-build/backend
+          PASTEBOX_TEST_PUBLIC: /tmp/pastebox-ci-public
+        run: npm run test:e2e
+      - name: Keep failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-failure-diagnostics
+          path: frontend/test-results/
+          retention-days: 5
+          if-no-files-found: ignore

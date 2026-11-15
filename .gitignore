@@ -24,3 +24,16 @@ Thumbs.db
 # Drogon generated boilerplate (not used, contain example credentials)
 backend/config.yaml
 backend/models/model.json
+
+# Private runtime data and credentials
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+.env
+.env.*
+!.env.example
+/backups/
+__pycache__/
+*.py[cod]

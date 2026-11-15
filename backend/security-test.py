@@ -128,7 +128,7 @@ class API(unittest.TestCase):
         path = '/api/pastes/' + paste['id']
         self.assertEqual(self.request(path,'PUT',{'tags':['z','z']},token=paste['owner_token'])[0],200)
         self.assertEqual(self.request(path)[1]['tags'],['z'])
-        for tags in [[{}], [''], ['a']*11, ['bad,tag']]:
+        for tags in [[{}], [''], ['a']*11, ['bad,tag'], ['bad\x01tag']]:
             self.assertEqual(self.request(path,'PUT',{'title':'bad','tags':tags},token=paste['owner_token'])[0],400)
         self.assertNotEqual(self.request(path)[1]['title'],'bad')
         self.assertEqual(self.request(path,'PUT',{'tags':[]},token=paste['owner_token'])[0],200)

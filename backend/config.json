@@ -21,20 +21,22 @@
         "home_page": "index.html",
         "upload_path": "uploads",
         "file_types": [
-            "gif",
-            "png",
-            "jpg",
-            "js",
             "css",
+            "eot",
+            "gif",
             "html",
             "ico",
+            "jpg",
+            "js",
+            "json",
+            "png",
             "svg",
+            "ttf",
+            "txt",
             "webp",
             "woff",
             "woff2",
-            "ttf",
-            "eot",
-            "json"
+            "xml"
         ],
         "use_gzip": true,
         "log": {
@@ -42,7 +44,10 @@
         },
         "run_as_daemon": false,
         "use_sendfile": true,
-        "idle_connection_timeout": 60,
-        "client_max_body_size": "4M"
+        "idle_connection_timeout": 30,
+        "client_max_body_size": "4M",
+        "max_connections": 256,
+        "keepalive_requests": 100,
+        "pipelining_requests": 4
     }
 }

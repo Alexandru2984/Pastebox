@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /embed/
+Sitemap: https://pastebox.micutu.com/sitemap.xml

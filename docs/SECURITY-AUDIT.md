@@ -50,3 +50,19 @@ Implemented owner capabilities (256 random bits; SHA-256 digest in SQLite), priv
 Verification: isolated C++ release build and 17 API regression scenarios, including eight simultaneous mixed raw/JSON reads (exactly one receives content), ownership and private bypass checks, legacy migration, input abuse and UTF-8 limits. Frontend ownership/reveal regressions supplement the existing suite. The active production executable/data have not been changed at this stage.
 
 Remaining: proxy mode is opt-in until a sanitized ingress is configured; the live nginx headers must be aligned at rollout. A page ceiling bounds main database growth, not total backup/log/WAL usage. In-memory throttles reset on restart and local host access is trusted only under explicit proxy mode. Owner capabilities in browser storage require the same XSS protections as other browser credentials. Legacy private access and legacy mutation recovery require operator verification.
+
+## Dependency, host and privacy follow-up
+
+The npm lockfile was updated within compatible ranges. Final review audit reports 0 moderate/high/critical findings, with 2 low build-only findings (`deepmerge` and the Svelte Vite plugin dependency path), no upstream fix available. Runtime-only audit must be run separately. Shared host Drogon is 1.9.11; a framework/host update is a separate maintenance task, not silently applied to other VPS applications.
+
+A pattern scan of reachable Git history found password literals in documentation and test fixtures, and no matching private keys/AWS/GitHub tokens for the inspected patterns. This is bounded pattern coverage, not proof that every possible secret is absent. No credential values were printed.
+
+The existing analytics identifier/integration was preserved while moving tracking into a manual, production-host-only public-route wrapper. It sends no paste IDs/titles/form values/referrers, honors DNT/GPC and disables automatic page/click tracking. The active nginx vhost had a shared robots override, a 512K transport limit, conflicting frame headers, no root CSP and a direct-origin bypass around Cloudflare. The release vhost supplies sanitized client IPs, 4M transport allowance, public-only embed framing, application-owned robots, dedicated query-free logs and the existing Cloudflare peer guard. Global Cloudflare/tunnel definitions and other sites are unchanged.
+
+C++ release hardening adds PIE, full RELRO/NOW, nonexecutable stack, stack protection and fortified libc calls. CI and the old shell-test entrypoints use disposable data; they no longer default to production.
+
+## Final pre-rollout validation
+
+Clean `npm ci`, 74 frontend cases, 19 isolated API cases and 10 browser flows passed. C++ also built and passed the same API suite inside a CPU/memory-limited, clean Ubuntu 24.04 container using the distribution's Drogon 1.8.7, SQLite 3.45.1 and OpenSSL 3.0.13. The native VPS build uses Drogon 1.9.11. This caught and corrected the CI MariaDB development dependency; no host package replacement was performed. Upstream distribution CMake emits a deprecated `exec_program` developer warning, without build/test failure.
+
+ShellCheck, shell/Python syntax, workflow YAML parsing, lockfile consistency, `git diff --check`, and a separate nginx configuration parse passed. The native binary is PIE with RELRO/NOW and a nonexecutable stack. Remote GitHub Actions execution remains pending a push; its workflow is not represented as already executed remotely.

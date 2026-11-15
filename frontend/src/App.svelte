@@ -8,6 +8,7 @@
   import ThemeSwitcher from './ThemeSwitcher.svelte';
   import Toast from './Toast.svelte';
   import Icon from './Icon.svelte';
+  import { trackPublicPage } from './lib/analytics.js';
   import { initTheme } from './lib/themes.js';
   let currentView = 'create';
   let currentId = '';
@@ -19,6 +20,9 @@
     if (match) { currentView = match[1] === 'paste' ? 'view' : 'embed'; currentId = match[2]; }
     else { currentView = hash === '#/list' ? 'list' : hash === '#/library' ? 'library' : 'create'; currentId = ''; }
     document.title = ({ create: 'PasteBox — A home for your next snippet', list: 'Explore snippets · PasteBox', library: 'Your library · PasteBox', view: 'View paste · PasteBox', embed: 'Embedded paste · PasteBox' })[currentView];
+    const robots = document.querySelector('meta[name="robots"]');
+    if (robots) robots.content = currentView === 'create' || currentView === 'list' ? 'index, follow' : 'noindex, nofollow, noarchive';
+    trackPublicPage();
     window.scrollTo?.({ top: 0, behavior: 'instant' });
   }
   function navigate(view, id = '') {

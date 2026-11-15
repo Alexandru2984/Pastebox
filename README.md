@@ -1,231 +1,110 @@
-# 📦 PasteBox
+# PasteBox
 
-A fast, feature-rich pastebin and code sharing app with syntax highlighting, built with a C++ backend for maximum performance.
+A self-hosted home for code snippets, notes, and ideas. C++17 / Drogon API, SQLite, Svelte 5, Vite, and Tailwind CSS.
 
-**Live:** [pastebox.micutu.com](https://pastebox.micutu.com)
+Live: [pastebox.micutu.com](https://pastebox.micutu.com/)
 
-![Stack](https://img.shields.io/badge/C++-Drogon-blue?logo=cplusplus)
-![Stack](https://img.shields.io/badge/Frontend-Svelte_5-orange?logo=svelte)
-![Stack](https://img.shields.io/badge/DB-SQLite3-green?logo=sqlite)
-![Stack](https://img.shields.io/badge/CSS-Tailwind_4-06B6D4?logo=tailwindcss)
-![Tests](https://img.shields.io/badge/Tests-200_passing-brightgreen)
+## What you can do
 
-## Features
+- Create, edit, delete and fork snippets; copy, share and download them.
+- Explore public titles/tags with search, language/tag filters and newest/oldest/most-viewed sorting.
+- Keep owned snippets and favorites in a browser-local library; verify/import an owner key on another browser.
+- Write with starter templates, text-file import, JSON formatting, Tab indentation, word wrap, UTF-8 byte counts and optional public draft recovery.
+- Read with syntax highlighting loaded per language, line numbers, wrapping and font controls. Large snippets avoid expensive highlighting/line-number DOMs.
+- Choose public, unlisted or private access, a reading password, expiration, or explicit one-time reveal.
+- Embed public, unprotected, reusable snippets with `/embed/ID`.
+- Use four themes, keyboard shortcuts and responsive layouts down to 320px.
 
-### Core
-- ✍️ Create, edit, fork, and delete pastes
-- 🔍 Syntax highlighting for 30+ languages (highlight.js)
-- 📋 Copy to clipboard / 🔗 Share link / Raw view
-- 📃 Browse public pastes with pagination
-- 🏷️ Tag system with filtering
-- 👁️ View counter per paste
-- ⏰ Auto-expiration (1h, 24h, 7d, 30d)
-- 🔥 Burn after read (self-destructing pastes)
-- 🔒 Password protection (salted SHA-256, constant-time comparison)
-- 👁️‍🗨️ Visibility controls (public, unlisted, private)
-- 🍴 Fork any paste (with parent tracking)
-- 📐 Embeddable `<iframe>` widget
+## Access and privacy
 
-### UI/UX
-- 🌗 Multiple themes (Dark, Light, Monokai, Solarized, Nord, Dracula)
-- ⌨️ Keyboard shortcuts (Ctrl+Enter to submit, Ctrl+S to save, Ctrl+Shift+N for new)
-- 📱 Fully responsive / mobile-friendly
-- ♿ Accessible: semantic HTML, ARIA labels, keyboard navigation, screen reader support
-- 🔔 Toast notifications
+Each new paste returns an **owner key** once. Its digest is stored on the server; the browser saves the key in its local library. This capability is required to edit/delete a paste and to read a private paste. Back it up privately from Library. Clearing browser storage removes that browser's saved keys. An imported key is verified before replacing existing access.
 
-### Security
-- 🛡️ CSRF protection (custom header required on all mutations)
-- 🚦 Rate limiting (token bucket: 10 req/s, burst 30)
-- 🔐 Brute-force protection (5 failures → 5 min lockout per IP)
-- 🔒 All security headers: CSP, HSTS, X-Frame-Options, Permissions-Policy, etc.
-- 🎲 Cryptographic ID generation (OpenSSL RAND_bytes, rejection sampling)
-- 🕵️ Anti-enumeration (password failures return 404, not 403)
-- 🌐 CORS restricted to production origin
-- 🔗 Backend binds to 127.0.0.1 only (nginx reverse proxy)
+A **read password grants reading only**. Public pastes can be discovered in Explore; unlisted pastes require the link; private pastes require the owner key, including on raw/fork routes. One-time pastes wait for confirmation and are atomically deleted before content is returned. Receiving the content cannot be undone and does not erase copies already made by a reader. Forks inherit protection and expiration; protected provenance is omitted.
 
-## Project Structure
+Owner keys never appear in share URLs. Read passwords and paste bodies are excluded from the library. Optional drafts store **public, unprotected, reusable** content only; choosing private, unlisted, password or one-time access removes the saved draft. The existing self-hosted Umami integration sends manual homepage/Explore pageviews only, without paste IDs, titles, form values or referrers, and respects Do Not Track/GPC.
 
-```
-pastebox/
-├── backend/                    # Drogon C++ API
-│   ├── controllers/
-│   │   ├── PasteController.h   # Route definitions
-│   │   └── PasteController.cc  # All endpoint logic + security
-│   ├── main.cc                 # Entry point, DB init, rate limiting, CORS
-│   ├── config.json             # Drogon configuration
-│   ├── CMakeLists.txt
-│   ├── test.sh                 # 93 integration tests
-│   └── e2e-test.sh             # 44 E2E flow tests
-├── frontend/                   # Svelte 5 SPA
-│   ├── src/
-│   │   ├── App.svelte          # Main app + hash router
-│   │   ├── CreatePaste.svelte  # Paste creation form
-│   │   ├── PasteView.svelte    # Viewer with edit mode
-│   │   ├── PasteList.svelte    # Browse + pagination
-│   │   ├── EmbedView.svelte    # Embeddable widget
-│   │   ├── ThemeSwitcher.svelte
-│   │   ├── Toast.svelte
-│   │   ├── lib/
-│   │   │   ├── api.js          # API client with CSRF
-│   │   │   ├── languages.js    # Language definitions
-│   │   │   ├── themes.js       # Theme definitions
-│   │   │   └── toast.js        # Toast store
-│   │   └── __tests__/          # 63 vitest tests (7 test files)
-│   ├── vitest.config.js
-│   └── package.json
-└── .gitignore
-```
+Content is plaintext in SQLite. Access control and HTTPS do **not** provide end-to-end encryption. Browser scripts on this origin are trusted, so protect the origin and analytics deployment. No account-based recovery exists.
 
-## Prerequisites
+**Legacy migration:** older pastes have no recorded owner. Their data is retained, but edit/delete fail closed; legacy private records without owner keys cannot be read by guessing their IDs. Recovery requires independently verified operator action. Existing SHA-256 reading passwords continue to verify and upgrade to scrypt on successful reads.
 
-- **CMake** ≥ 3.5
-- **g++** with C++17 support
-- **libdrogon-dev** (+ dependencies)
-- **OpenSSL** development headers
-- **Node.js** ≥ 18
-- **npm**
+## Build
 
-On Ubuntu/Debian:
+Requires Node >=22.12 (Node 24 recommended), CMake >=3.20, C++17, Drogon, OpenSSL, SQLite >=3.38 and Brotli development libraries.
+
 ```bash
-sudo apt install cmake g++ libdrogon-dev libpq-dev libmysqlclient-dev \
-  libbrotli-dev libhiredis-dev libc-ares-dev libyaml-cpp-dev \
-  libsqlite3-dev libssl-dev
+sudo apt install cmake make g++ libdrogon-dev libpq-dev libmariadb-dev \
+  libbrotli-dev libhiredis-dev libc-ares-dev libyaml-cpp-dev libsqlite3-dev libssl-dev libjsoncpp-dev uuid-dev zlib1g-dev
+npm --prefix frontend ci
+cmake -S backend -B /tmp/pastebox-build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/pastebox-build -j2
+npm --prefix frontend run build -- --outDir /tmp/pastebox-public
 ```
 
-## Build & Run
+Preview with disposable data and an automatically selected loopback port:
 
-### 1. Build the frontend
 ```bash
+python3 scripts/preview.py --binary /tmp/pastebox-build/backend --public /tmp/pastebox-public
+```
+
+The preview database is removed when the process exits. For frontend hot reload, `npm --prefix frontend run dev` binds to loopback and proxies `/api` to `127.0.0.1:7777`; point it only at a backend you intend to use. Build outside the production executable/static directory.
+
+## Verification
+
+```bash
+ctest --test-dir /tmp/pastebox-build --output-on-failure
+npm --prefix frontend test
+npm --prefix frontend audit --audit-level=moderate
+npm --prefix frontend audit --omit=dev --audit-level=low
 cd frontend
-npm install
-npx vite build --outDir ../backend/build/public --emptyOutDir
+npx playwright install chromium
+PASTEBOX_TEST_BINARY=/tmp/pastebox-build/backend \
+PASTEBOX_TEST_PUBLIC=/tmp/pastebox-public npm run test:e2e
 ```
 
-### 2. Build the backend
-```bash
-mkdir -p backend/build && cd backend/build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
-```
+The Python API suite always creates its own server/database. It does not accept a remote base URL. `backend/test.sh /path/to/test-build/backend` runs this same isolated suite; the old production-default shell tests have been replaced. Playwright starts another disposable backend on loopback port 19779 and runs desktop/mobile workflows.
 
-### 3. Run
-```bash
-cd backend/build
-./backend
-```
+Current suites: 74 frontend cases, 19 API security/lifecycle cases and 10 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
 
-The app will be available at **http://localhost:7777**
+GitHub Actions performs clean installs, hardened C++ build, API regressions, frontend tests/build, dependency audit and browser flows. Actions are pinned to commit SHAs; credentials are read-only and there is no deployment or production secret in CI. Dependabot opens weekly dependency update PRs. A workflow file is not evidence that remote CI has already run.
+
+Two low build-only advisories remain in `deepmerge` / the Svelte Vite plugin, with no upstream fix available at review time. There are no moderate/high/critical advisories in the updated npm tree. `npm audit --omit=dev` checks the shipped dependency separately. Re-run audits as advisories change.
 
 ## API
 
-All state-changing endpoints require the `X-Requested-With: PasteBox` header (CSRF protection).
+Mutations require `X-Requested-With: PasteBox` and JSON bodies where applicable. An Origin, if present, must match the configured origin. Supply owner/read secrets in headers, never query strings.
 
-| Method   | Endpoint                | Description                          |
-|----------|-------------------------|--------------------------------------|
-| `POST`   | `/api/pastes`           | Create a new paste                   |
-| `GET`    | `/api/pastes`           | List public pastes (paginated)       |
-| `GET`    | `/api/pastes/:id`       | Get paste by ID                      |
-| `PUT`    | `/api/pastes/:id`       | Update a paste                       |
-| `DELETE` | `/api/pastes/:id`       | Delete a paste                       |
-| `GET`    | `/api/pastes/:id/raw`   | Get raw content (text/plain)         |
-| `POST`   | `/api/pastes/:id/fork`  | Fork a paste                         |
-| `GET`    | `/api/health`           | Health check                         |
+| Method | Route | Purpose |
+| --- | --- | --- |
+| POST | `/api/pastes` | Create; returns `owner_token` once |
+| GET | `/api/pastes` | Public metadata; `q`, `tag`, `language`, `sort`, `page`, `limit` |
+| GET | `/api/pastes/ID` | Read; optional `X-Password` or `X-Owner-Token` |
+| GET | `/api/pastes/ID/raw` | Same authorization/burn policy, text/plain |
+| GET | `/api/pastes/ID/ownership` | Verify owner key, metadata only; no reveal |
+| GET | `/api/pastes/ID/embed` | Public, unprotected, reusable content only |
+| PUT | `/api/pastes/ID` | Owner-only title/content/language/visibility/tags update |
+| DELETE | `/api/pastes/ID` | Owner-only deletion |
+| POST | `/api/pastes/ID/fork` | New owner key; inherited privacy/password/expiry |
+| GET | `/api/health` | Database readiness, no private aggregate counts |
 
-### Query Parameters
+Create fields: `content`, `title`, `language`, `visibility`, `password`, `expires_in` (`1h`, `24h`, `7d`, `30d` or empty), `burn_after_read`, `tags`. Content limit: 512 KiB **UTF-8 bytes**; title: 200 bytes; tags: up to 10, each 50 bytes. The 4 MiB transport limit allows JSON escaping overhead. Reading passwords have a compatibility minimum of 4 bytes; use a long, unique passphrase.
 
-| Endpoint         | Param     | Description                        |
-|------------------|-----------|------------------------------------|
-| `GET /api/pastes`| `tag`     | Filter by tag                      |
-| `GET /api/pastes`| `page`    | Page number (default: 1)           |
-| `GET /api/pastes`| `limit`   | Results per page (default: 50, max: 100) |
+A one-time read first returns `409` with `burn_confirmation_required`; explicitly send `X-Confirm-Burn: yes` to reveal. Wrong/missing passwords return a challenge without content; missing-password prompts do not consume the guess budget. `429` includes `Retry-After`. Public listing searches metadata only and retrieves one extra row to determine `has_more` correctly.
 
-### Headers
+## Configuration and operations
 
-| Header            | Used on          | Description                           |
-|-------------------|------------------|---------------------------------------|
-| `X-Requested-With`| POST, PUT, DELETE| Required CSRF token (value: `PasteBox`)|
-| `X-Password`      | GET, PUT, DELETE | Password for protected pastes         |
+`backend/config.json` is a development template. `PASTEBOX_CONFIG` selects an absolute config file; the legacy default is `../config.json` relative to the working directory. SQLite/static paths in that file are relative to the process working directory unless absolute.
 
-### Examples
+- `PASTEBOX_ORIGIN`: allowed browser origin, default `https://pastebox.micutu.com`.
+- `PASTEBOX_TRUST_PROXY=1`: opt-in loopback proxy trust. Enable only when nginx overwrites `X-Real-IP`. Forwarded-for chains are ignored.
+- Request, write and password budgets have bounded in-memory state and reset on restart. Database growth is capped at 65,536 pages, about 256 MiB with default 4 KiB pages; logs/WAL/backups need separate disk monitoring.
+- Production retains the existing dedicated service user and systemd restrictions. This release does not upgrade shared host libraries or modify other applications.
 
-```bash
-# Create a paste
-curl -X POST http://localhost:7777/api/pastes \
-  -H 'Content-Type: application/json' \
-  -H 'X-Requested-With: PasteBox' \
-  -d '{
-    "title": "Hello World",
-    "content": "print(42)",
-    "language": "python",
-    "visibility": "public",
-    "tags": ["python", "demo"]
-  }'
-
-# Create a password-protected, self-destructing paste
-curl -X POST http://localhost:7777/api/pastes \
-  -H 'Content-Type: application/json' \
-  -H 'X-Requested-With: PasteBox' \
-  -d '{
-    "content": "secret data",
-    "password": "mypassword",
-    "burn_after_read": true,
-    "expires_in": "1h"
-  }'
-
-# Get a paste (with password)
-curl http://localhost:7777/api/pastes/<id> -H 'X-Password: mypassword'
-
-# List pastes (page 2, 10 per page, filtered by tag)
-curl 'http://localhost:7777/api/pastes?tag=python&page=2&limit=10'
-
-# Update a paste
-curl -X PUT http://localhost:7777/api/pastes/<id> \
-  -H 'Content-Type: application/json' \
-  -H 'X-Requested-With: PasteBox' \
-  -d '{"title": "Updated Title", "content": "new content"}'
-
-# Fork a paste
-curl -X POST http://localhost:7777/api/pastes/<id>/fork \
-  -H 'Content-Type: application/json' \
-  -H 'X-Requested-With: PasteBox' \
-  -d '{"title": "My Fork"}'
-
-# Delete a paste
-curl -X DELETE http://localhost:7777/api/pastes/<id> \
-  -H 'X-Requested-With: PasteBox'
-```
-
-## Testing
+The VPS-specific tested rollout entrypoint is:
 
 ```bash
-# Backend integration tests (93 tests)
-bash backend/test.sh
-
-# E2E flow tests (44 tests)
-bash backend/e2e-test.sh
-
-# Frontend unit + component tests (63 tests)
-cd frontend && npx vitest run
+sudo scripts/deploy-vps.sh /path/to/tested/backend /path/to/tested/public
 ```
 
-**Total: 200 tests** covering CRUD, security (CSRF, XSS, SQLi, brute-force), pagination, password flows, burn-after-read, visibility, accessibility, and performance.
+It requires the existing PasteBox service, paths, certificates and maintained Cloudflare nginx origin guard. It stores a restricted online SQLite snapshot, checks integrity, performs a disposable restore check, saves old binary/assets/config, validates nginx, installs artifacts and restarts only PasteBox. Old hashed assets remain available to open browser tabs. Failed readiness triggers artifact/config rollback; the live database is retained because schema changes are additive. Backups remain under `/var/backups/pastebox` and require an operator retention/off-host backup policy.
 
-## Deployment
-
-The app is deployed with:
-- **systemd** service (`pastebox.service`)
-- **nginx** reverse proxy with SSL (Let's Encrypt / certbot)
-- Drogon binds to `127.0.0.1:7777` (not exposed to internet)
-
-## Configuration
-
-Edit `backend/config.json` to change:
-- **Listen address** (default: `127.0.0.1`)
-- **Port** (default: 7777)
-- **Thread count** (default: 4)
-- **Max body size** (default: 512K)
-- **Log level** (default: INFO)
-
-## License
-
-MIT
+See [security findings and remaining risks](docs/SECURITY-AUDIT.md), [product roadmap](docs/ROADMAP.md), and [release/response procedure](docs/OPERATIONS.md). SEO indexes the homepage only; API/embed responses are noindex and the sitemap contains no user pastes. Hash routing does not provide server-rendered per-paste previews.

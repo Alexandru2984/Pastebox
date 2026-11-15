@@ -6,6 +6,7 @@
 #include <openssl/sha.h>
 #include <openssl/crypto.h>
 #include <charconv>
+#include <algorithm>
 #include <set>
 #include <map>
 #include <sstream>
@@ -138,8 +139,10 @@ Json::Value body(const HttpRequestPtr &req) {
         const auto &tags = (*json)["tags"];
         if (!tags.isArray() || tags.size() > 10) fail(k400BadRequest, "Use an array of at most 10 tags");
         for (const auto &tag : tags) {
-            if (!tag.isString() || tag.asString().empty() || tag.asString().size() > 50 ||
-                tag.asString().find_first_of(",\r\n\t") != std::string::npos || tag.asString().find('\0') != std::string::npos)
+            if (!tag.isString()) fail(k400BadRequest,"Tags must be strings");
+            const auto text = tag.asString();
+            if (text.empty() || text.size() > 50 || text.find(',') != std::string::npos ||
+                std::any_of(text.begin(),text.end(),[](unsigned char c) { return c < 32 || c == 127; }))
                 fail(k400BadRequest, "Tags must be nonempty strings of at most 50 bytes without commas or control characters");
         }
     }
