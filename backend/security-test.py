@@ -20,13 +20,14 @@ import urllib.request
 ORIGIN = 'https://pastebox.micutu.com'
 
 class API(unittest.TestCase):
-    base = ''
-    database = ''
+    binary = None
     sequence = 0
 
     def setUp(self):
         API.sequence += 1
         self.ip = f'192.0.2.{API.sequence}'
+        # Each case gets fresh process-wide quotas and its own migrated database.
+        self.start_server()
 
     def request(self, path='/api/pastes', method='GET', data=None, token='', password='', headers=None):
         sent = {'X-Real-IP': self.ip, 'X-Requested-With': 'PasteBox'}
@@ -369,7 +370,7 @@ class API(unittest.TestCase):
             codes.append(self.request('/api/health',headers={'X-Forwarded-For':f'198.51.100.{i}'})[0])
         self.assertIn(429,codes)
 
-    def test_z_distributed_password_work_has_a_global_budget(self):
+    def test_distributed_password_work_has_a_global_budget(self):
         # Slow CPUs may already be below the quota. Verify admitted work over
         # the measured interval, and retry headers whenever throttling occurs.
         owned = self.create(content='owner access stays available')
@@ -391,20 +392,16 @@ class API(unittest.TestCase):
         self.assertEqual(self.request('/api/health')[0],200)
         self.assertEqual(self.request('/api/pastes/'+owned['id'],token=owned['owner_token'])[0],200)
 
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--binary',type=Path,required=True)
-    args = parser.parse_args()
-    binary = args.binary.resolve(strict=True)
-    with tempfile.TemporaryDirectory(prefix='pastebox-regression-') as directory:
-        root = Path(directory)
+    def start_server(self):
+        directory = tempfile.TemporaryDirectory(prefix='pastebox-regression-')
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
         (root/'public').mkdir()
         (root/'public'/'index.html').write_text('<!doctype html><title>test</title>')
         with socket.socket() as sock:
             sock.bind(('127.0.0.1',0))
             port = sock.getsockname()[1]
-        config = json.loads((Path(__file__).parent/'config.json').read_text())
+        config = json.loads((Path(__file__).resolve().parent/'config.json').read_text())
         config['listeners'][0]['port'] = port
         config['app']['document_root'] = str(root/'public')
         config['db_clients'][0]['filename'] = str(root/'test.db')
@@ -414,34 +411,46 @@ def main():
             connection.execute("INSERT INTO pastes(id,content) VALUES('legacyPlain','fixture')")
             connection.execute("INSERT INTO pastes(id,content,visibility) VALUES('legacyPrivate','fixture','private')")
             connection.execute("INSERT INTO pastes(id,content,password_hash) VALUES('legacyPassword','fixture',?)",(hashlib.sha256(b'old-password').hexdigest(),))
-        env = {**os.environ,'PASTEBOX_CONFIG':str(root/'config.json'),'PASTEBOX_TRUST_PROXY':'1'}
-        API.base = f'http://127.0.0.1:{port}'
-        API.database = str(root/'test.db')
-        with (root/'server.log').open('w+') as logfile:
-            server = subprocess.Popen([str(binary)],cwd=root,env=env,stdout=logfile,stderr=logfile)
+        env = {**os.environ,'PASTEBOX_CONFIG':str(root/'config.json'),'PASTEBOX_TRUST_PROXY':'1','PASTEBOX_ORIGIN':ORIGIN}
+        self.base = f'http://127.0.0.1:{port}'
+        self.database = str(root/'test.db')
+        logfile = (root/'server.log').open('w+')
+        self.addCleanup(logfile.close)
+        server = subprocess.Popen([str(self.binary)],cwd=root,env=env,stdout=logfile,stderr=logfile)
+        self.addCleanup(self.stop_server, server, logfile)
+        for _ in range(100):
             try:
-                for _ in range(100):
-                    try:
-                        urllib.request.urlopen(API.base+'/api/health',timeout=0.2).close()
-                        break
-                    except (OSError,urllib.error.URLError):
-                        if server.poll() is not None:
-                            logfile.seek(0)
-                            raise RuntimeError(logfile.read())
-                        time.sleep(0.05)
-                suite = unittest.defaultTestLoader.loadTestsFromTestCase(API)
-                result = unittest.TextTestRunner(verbosity=2).run(suite)
-                if not result.wasSuccessful():
+                urllib.request.urlopen(self.base+'/api/health',timeout=0.2).close()
+                break
+            except (OSError,urllib.error.URLError):
+                if server.poll() is not None:
                     logfile.seek(0)
-                    print(logfile.read()[-4000:])
-                return 0 if result.wasSuccessful() else 1
-            finally:
-                server.terminate()
-                try:
-                    server.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    server.kill()
-                    server.wait()
+                    raise RuntimeError(logfile.read())
+                time.sleep(0.05)
+        else:
+            raise RuntimeError('Disposable backend did not become ready')
+
+    def stop_server(self, server, logfile):
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait()
+        if server.returncode not in (0, -15):
+            logfile.seek(0)
+            print(logfile.read()[-4000:])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--binary', type=Path, required=True)
+    args = parser.parse_args()
+    API.binary = args.binary.resolve(strict=True)
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(API)
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    return 0 if result.wasSuccessful() else 1
+
 
 if __name__ == '__main__':
     raise SystemExit(main())
