@@ -107,4 +107,6 @@ sudo scripts/deploy-vps.sh /path/to/tested/backend /path/to/tested/public
 
 It requires the existing PasteBox service, paths, certificates and maintained Cloudflare nginx origin guard. It stores a restricted online SQLite snapshot, checks integrity, performs a disposable restore check, saves old binary/assets/config, validates nginx, installs artifacts and restarts only PasteBox. Old hashed assets remain available to open browser tabs. Failed readiness triggers artifact/config rollback; the live database is retained because schema changes are additive. Backups remain under `/var/backups/pastebox` and require an operator retention/off-host backup policy.
 
+Read-only live checks: `python3 scripts/smoke.py`. See the [release verification](docs/RELEASE-2026-11-15.md).
+
 See [security findings and remaining risks](docs/SECURITY-AUDIT.md), [product roadmap](docs/ROADMAP.md), and [release/response procedure](docs/OPERATIONS.md). SEO indexes the homepage only; API/embed responses are noindex and the sitemap contains no user pastes. Hash routing does not provide server-rendered per-paste previews.

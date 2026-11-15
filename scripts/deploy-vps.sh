@@ -68,7 +68,7 @@ PASTEBOX_NEXT="$(mktemp -d "$PASTEBOX_LIVE/public-next-XXXXXX")"
 cp -a "$PASTEBOX_PUBLIC/." "$PASTEBOX_NEXT/"
 if [[ -d "$PASTEBOX_LIVE/public/assets" ]]; then
   mkdir -p "$PASTEBOX_NEXT/assets"
-  cp -an "$PASTEBOX_LIVE/public/assets/." "$PASTEBOX_NEXT/assets/"
+  cp --archive --update=none "$PASTEBOX_LIVE/public/assets/." "$PASTEBOX_NEXT/assets/"
 fi
 chmod 0755 "$PASTEBOX_NEXT"
 install -m 0644 "$PASTEBOX_REPO/backend/config.json" /etc/pastebox/config.json

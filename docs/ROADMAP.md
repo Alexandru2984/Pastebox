@@ -71,3 +71,7 @@ Initial JS reduced from about 1,011 KB / 341 KB gzip to 125 KB / 47 KB gzip; lan
 Homepage canonical/social card, app-owned robots/sitemap, API/embed noindex and manual public-only analytics are implemented. CI pins Actions SHAs, uses read-only checkout credentials and repeats clean frontend install, audits/build/tests plus isolated C++ and desktop/mobile workflows. Weekly dependency PRs are configured. The VPS rollout includes a restricted online database snapshot, restore verification and automatic artifact rollback. Nginx sanitizes visitor identity, rejects direct non-Cloudflare peers, bounds API ingress and supports only the dedicated public embed page for external framing. C++ connection/pipeline limits and release hardening are configured.
 
 Pending wider product work remains listed above: cross-device accounts, encryption, multi-file/version history, abuse moderation, external security/accessibility review, alerting and encrypted off-host recovery. These are not claimed as shipped by this release.
+
+## Production status
+
+This release is live. See [release verification and residual work](RELEASE-2026-11-15.md). The checked-in roadmap distinguishes delivered functionality from the next product/security increments; remote CI still requires a push.
