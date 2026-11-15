@@ -102,3 +102,7 @@ Added an aggregate scrypt budget alongside per-IP limits, with an explicit retry
 ### Additional compatibility and mobile fixes
 
 Legacy forks retain an upgraded password verifier rather than copying a stale pre-upgrade value. Imported filenames keep an existing correct extension when downloaded. Markdown controls have a dedicated narrow-screen row, file badges show actual extensions, and notification width stays inside the viewport. A reusable UI smoke command blocks writes/third-party traffic while verifying an unpublished preview on production or an isolated loopback server.
+
+## Latest production status
+
+Revision history, safe Markdown preview, aggregate password resource limits and legacy-fork/mobile fixes are live. See [release 2 verification](RELEASE-2026-11-15-R2.md). The next increments remain multi-file documents, capability management, accounts/encryption and production operations work listed above.

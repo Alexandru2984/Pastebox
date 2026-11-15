@@ -96,3 +96,7 @@ Per-IP throttling did not bound expensive scrypt work across many visitor addres
 ## Continuation: legacy password upgrade during fork
 
 Fork authorization may upgrade a legacy SHA-256 verifier inside its transaction. The original row object still held the old verifier, so copying that object could reintroduce a weak verifier into the new paste. Fork now reloads the stored verifier after authorization before copying protection. Regression seeds a legacy fixture and checks both source and fork use the same upgraded scrypt verifier; protected reading still succeeds.
+
+## Continuation production result
+
+The history/Markdown/resource-guard release is live. All 145 cases passed, including the native and CPU-limited distribution API suites. Live read-only UI verification exercised an unpublished Markdown draft through Cloudflare at 375px/320px with writes blocked, reporting zero writes/runtime errors. Snapshot/restore, live schema/integrity, active-record preservation and artifact identity were verified. See [release 2](RELEASE-2026-11-15-R2.md) for evidence, the new backup path and remaining limits.
