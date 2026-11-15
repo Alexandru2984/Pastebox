@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher, onMount, tick } from 'svelte';
   import { getPaste, forkPaste, updatePaste, getRawUrl } from './lib/api.js';
+  import { importOwnerKey } from './lib/library.js';
   import { success, error as toastError } from './lib/toast.js';
   import hljs from 'highlight.js';
   import 'highlight.js/styles/github-dark.css';
@@ -15,6 +16,10 @@
   let copied = false;
   let codeEl;
   let passwordRequired = false;
+  let ownerRequired = false;
+  let burnRequired = false;
+  let ownerInput = '';
+  let requestNumber = 0;
   let passwordInput = '';
   let currentPassword = '';
   let passwordInputEl;
@@ -29,16 +34,25 @@
 
   $: if (pasteId) loadPaste();
 
-  async function loadPaste(pw = '') {
+  async function loadPaste(pw = '', confirmBurn = false) {
+    const currentRequest = ++requestNumber;
     loading = true;
     error = '';
+    ownerRequired = false;
+    burnRequired = false;
     passwordRequired = false;
     try {
-      paste = await getPaste(pasteId, pw || currentPassword);
+      const result = await getPaste(pasteId, pw || currentPassword, confirmBurn);
+      if (currentRequest !== requestNumber) return;
+      paste = result;
       currentPassword = pw || currentPassword;
+      loading = false;
       await tick();
       highlightCode();
     } catch (e) {
+      if (currentRequest !== requestNumber) return;
+      ownerRequired = e.ownerRequired || false;
+      burnRequired = e.burnRequired || false;
       if (e.passwordRequired) {
         passwordRequired = true;
         loading = false;
@@ -48,13 +62,14 @@
       }
       error = e.message || 'Paste not found';
     } finally {
-      loading = false;
+      if (currentRequest === requestNumber) loading = false;
     }
   }
 
   function highlightCode() {
     if (!paste || !codeEl) return;
     codeEl.textContent = paste.content;
+    if (paste.content.length > 100000) return;
     delete codeEl.dataset.highlighted;
     if (paste.language === 'auto' || paste.language === 'plaintext') {
       hljs.highlightElement(codeEl);
@@ -66,6 +81,17 @@
         hljs.highlightElement(codeEl);
       }
     }
+  }
+
+  function restoreOwner() {
+    try { importOwnerKey(pasteId, ownerInput.trim()); loadPaste(); }
+    catch (e) { toastError(e.message); }
+  }
+
+  function openRaw() {
+    const url = URL.createObjectURL(new Blob([paste.content], { type: 'text/plain;charset=utf-8' }));
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
   async function copyToClipboard() {
@@ -133,7 +159,7 @@
   }
 
   function formatDate(dateStr) {
-    return new Date(dateStr + 'Z').toLocaleString();
+    return new Date(/[zZ]$|[+-]\d\d:\d\d$/.test(dateStr) ? dateStr : dateStr.replace(' ', 'T') + 'Z').toLocaleString();
   }
 
   function formatSize(bytes) {
@@ -175,6 +201,16 @@
   <div class="flex flex-col items-center justify-center py-20 gap-4" role="alert">
     <div class="text-6xl" aria-hidden="true">😕</div>
     <div class="text-xl text-[var(--text-secondary)]">{error}</div>
+    {#if burnRequired}
+      <button on:click={() => loadPaste(passwordInput || currentPassword, true)}>Reveal one-time paste</button>
+      <p>Opening destroys the server copy. Save what you need before leaving.</p>
+    {/if}
+    {#if ownerRequired}
+      <form on:submit|preventDefault={restoreOwner} class="flex flex-wrap gap-2">
+        <input bind:value={ownerInput} type="password" aria-label="Owner key" placeholder="Paste your owner key" autocomplete="off" />
+        <button type="submit">Unlock with owner key</button>
+      </form>
+    {/if}
     <button on:click={() => dispatch('navigate', { view: 'create' })}
       class="px-4 py-2 bg-[var(--accent)] text-[var(--bg-primary)] rounded-lg cursor-pointer border-none font-medium text-sm">
       Create a new paste
@@ -251,23 +287,29 @@
             font-medium text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors cursor-pointer">
           🔗 Share
         </button>
+        {#if paste.has_password || paste.visibility === 'private' || paste.burned}
+          <button on:click={openRaw} aria-label="View raw paste" class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg text-xs cursor-pointer">Raw</button>
+        {:else}
         <a href={getRawUrl(pasteId)} target="_blank" rel="noopener" aria-label="View raw paste"
           class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg text-xs
             font-medium text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors no-underline">
           📄 Raw
         </a>
-        {#if !paste.burned}
+        {/if}
+        {#if !paste.burned && paste.can_manage}
           <button on:click={startEdit} aria-label="Edit paste"
             class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg text-xs
               font-medium text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors cursor-pointer">
             ✏️ Edit
           </button>
         {/if}
+        {#if !paste.burned && !paste.burn_after_read}
         <button on:click={handleFork} aria-label="Fork paste"
           class="px-3 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded-lg text-xs
             font-medium text-[var(--text-primary)] hover:border-[var(--accent)] transition-colors cursor-pointer">
           🍴 Fork
         </button>
+        {/if}
         <a href="data:text/plain;charset=utf-8,{encodeURIComponent(paste.content)}"
           download="{paste.title}.{paste.language === 'plaintext' ? 'txt' : paste.language}"
           aria-label="Download paste as file"
@@ -325,7 +367,7 @@
           <pre class="m-0 flex-1 overflow-x-auto"><code bind:this={codeEl}
             class="language-{paste.language}"
             style="padding: 1rem !important; font-size: 0.8125rem; line-height: 1.625;"
-            tabindex="0" aria-label="Code content"
+            aria-label="Code content"
           ></code></pre>
         </div>
       </div>

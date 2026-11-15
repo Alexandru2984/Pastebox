@@ -115,7 +115,7 @@
       {#if currentView === 'create'}
         <CreatePaste on:navigate={handleNav} />
       {:else if currentView === 'view'}
-        <PasteView pasteId={currentId} on:navigate={handleNav} />
+        {#key currentId}<PasteView pasteId={currentId} on:navigate={handleNav} />{/key}
       {:else if currentView === 'list'}
         <PasteList on:view={(e) => navigate('view', e.detail)} />
       {/if}

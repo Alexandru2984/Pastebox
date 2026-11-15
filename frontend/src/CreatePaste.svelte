@@ -67,6 +67,7 @@
         burn_after_read: burnAfterRead,
         tags: tagList.length > 0 ? tagList : undefined
       });
+      if (result.owner_saved === false) toastError('Owner key could not be saved in this browser. Keep this page open and copy the owner key.');
       success('Paste created!');
       title = ''; content = ''; language = 'plaintext'; tags = ''; password = '';
       burnAfterRead = false; expiresIn = ''; visibility = 'public';

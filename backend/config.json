@@ -21,8 +21,20 @@
         "home_page": "index.html",
         "upload_path": "uploads",
         "file_types": [
-            "gif", "png", "jpg", "js", "css", "html", "ico",
-            "svg", "webp", "woff", "woff2", "ttf", "eot", "json", "map"
+            "gif",
+            "png",
+            "jpg",
+            "js",
+            "css",
+            "html",
+            "ico",
+            "svg",
+            "webp",
+            "woff",
+            "woff2",
+            "ttf",
+            "eot",
+            "json"
         ],
         "use_gzip": true,
         "log": {
@@ -31,6 +43,6 @@
         "run_as_daemon": false,
         "use_sendfile": true,
         "idle_connection_timeout": 60,
-        "client_max_body_size": "512K"
+        "client_max_body_size": "4M"
     }
 }

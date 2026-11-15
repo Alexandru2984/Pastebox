@@ -1,172 +1,103 @@
 #include <drogon/drogon.h>
 #include <drogon/orm/DbClient.h>
-#include <iostream>
-#include <unordered_map>
-#include <mutex>
-#include <chrono>
-
-// Rate limiting state
-struct RateBucket {
-    double tokens;
-    std::chrono::steady_clock::time_point lastRefill;
-};
-static std::unordered_map<std::string, RateBucket> rateLimits;
-static std::mutex rateMutex;
-
-static constexpr double RATE_LIMIT = 10.0;  // requests per second
-static constexpr double BURST_SIZE = 30.0;
-static constexpr size_t MAX_PASTE_SIZE = 512 * 1024; // 512KB
-
-bool checkRateLimit(const std::string &ip) {
-    std::lock_guard<std::mutex> lock(rateMutex);
-    auto now = std::chrono::steady_clock::now();
-    auto &bucket = rateLimits[ip];
-    if (bucket.tokens == 0 && bucket.lastRefill.time_since_epoch().count() == 0) {
-        bucket.tokens = BURST_SIZE;
-        bucket.lastRefill = now;
-    }
-    double elapsed = std::chrono::duration<double>(now - bucket.lastRefill).count();
-    bucket.tokens = std::min(BURST_SIZE, bucket.tokens + elapsed * RATE_LIMIT);
-    bucket.lastRefill = now;
-    if (bucket.tokens >= 1.0) {
-        bucket.tokens -= 1.0;
-        return true;
-    }
-    return false;
-}
+#include <fstream>
+#include "Security.h"
 
 void initDatabase() {
     auto db = drogon::app().getDbClient();
-
-    // Enable WAL mode for better concurrent read/write performance
     db->execSqlSync("PRAGMA journal_mode=WAL");
     db->execSqlSync("PRAGMA foreign_keys=ON");
-
+    db->execSqlSync("PRAGMA busy_timeout=5000");
+    // Bound database growth (256 MiB with the default 4 KiB page size).
+    db->execSqlSync("PRAGMA max_page_count=65536");
     db->execSqlSync(
-        "CREATE TABLE IF NOT EXISTS pastes ("
-        "  id TEXT PRIMARY KEY,"
-        "  title TEXT NOT NULL DEFAULT 'Untitled',"
-        "  content TEXT NOT NULL,"
-        "  language TEXT NOT NULL DEFAULT 'plaintext',"
-        "  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
-        "  expires_at DATETIME,"
-        "  views INTEGER DEFAULT 0,"
-        "  password_hash TEXT,"
-        "  burn_after_read INTEGER DEFAULT 0,"
-        "  visibility TEXT DEFAULT 'public',"
-        "  parent_id TEXT"
-        ")");
-
-    db->execSqlSync(
-        "CREATE TABLE IF NOT EXISTS tags ("
-        "  paste_id TEXT NOT NULL,"
-        "  tag TEXT NOT NULL,"
-        "  PRIMARY KEY (paste_id, tag),"
-        "  FOREIGN KEY (paste_id) REFERENCES pastes(id) ON DELETE CASCADE"
-        ")");
-
-    // Migrate existing table if needed
-    try { db->execSqlSync("ALTER TABLE pastes ADD COLUMN expires_at DATETIME"); } catch (...) {}
-    try { db->execSqlSync("ALTER TABLE pastes ADD COLUMN password_hash TEXT"); } catch (...) {}
-    try { db->execSqlSync("ALTER TABLE pastes ADD COLUMN burn_after_read INTEGER DEFAULT 0"); } catch (...) {}
-    try { db->execSqlSync("ALTER TABLE pastes ADD COLUMN visibility TEXT DEFAULT 'public'"); } catch (...) {}
-    try { db->execSqlSync("ALTER TABLE pastes ADD COLUMN parent_id TEXT"); } catch (...) {}
-
-    // Create indexes for query performance
-    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_visibility ON pastes(visibility)");
-    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_expires ON pastes(expires_at)");
-    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_created ON pastes(created_at DESC)");
-    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_parent ON pastes(parent_id)");
-    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_tags_paste ON tags(paste_id)");
-    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag)");
-
-    std::cout << "[PasteBox] Database initialized (WAL mode, indexes created)." << std::endl;
-}
-
-void cleanupExpired() {
-    try {
-        auto db = drogon::app().getDbClient();
-        db->execSqlAsync(
-            "DELETE FROM pastes WHERE expires_at IS NOT NULL AND expires_at < datetime('now')",
-            [](const drogon::orm::Result &r) {
-                if (r.affectedRows() > 0)
-                    std::cout << "[PasteBox] Cleaned " << r.affectedRows() << " expired pastes." << std::endl;
-            },
-            [](const drogon::orm::DrogonDbException &) {});
-    } catch (...) {}
-}
-
-void cleanupRateLimits() {
-    std::lock_guard<std::mutex> lock(rateMutex);
-    auto now = std::chrono::steady_clock::now();
-    for (auto it = rateLimits.begin(); it != rateLimits.end(); ) {
-        double elapsed = std::chrono::duration<double>(now - it->second.lastRefill).count();
-        // Remove entries idle for over 5 minutes
-        if (elapsed > 300.0) {
-            it = rateLimits.erase(it);
-        } else {
-            ++it;
-        }
+        "CREATE TABLE IF NOT EXISTS pastes (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT 'Untitled',"
+        "content TEXT NOT NULL, language TEXT NOT NULL DEFAULT 'plaintext',"
+        "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME, views INTEGER DEFAULT 0,"
+        "password_hash TEXT, burn_after_read INTEGER DEFAULT 0, visibility TEXT DEFAULT 'public',"
+        "parent_id TEXT, owner_hash TEXT, updated_at DATETIME)");
+    auto columns = db->execSqlSync("PRAGMA table_info(pastes)");
+    const std::vector<std::pair<std::string, std::string>> additions = {
+        {"expires_at", "DATETIME"}, {"password_hash", "TEXT"},
+        {"burn_after_read", "INTEGER DEFAULT 0"}, {"visibility", "TEXT DEFAULT 'public'"},
+        {"parent_id", "TEXT"}, {"owner_hash", "TEXT"}, {"updated_at", "DATETIME"}
+    };
+    for (const auto &[name, type] : additions) {
+        bool found = false;
+        for (const auto &column : columns) if (column["name"].as<std::string>() == name) found = true;
+        if (!found) db->execSqlSync("ALTER TABLE pastes ADD COLUMN " + name + " " + type);
     }
+    db->execSqlSync("CREATE TABLE IF NOT EXISTS tags (paste_id TEXT NOT NULL, tag TEXT NOT NULL,"
+                    "PRIMARY KEY(paste_id,tag), FOREIGN KEY(paste_id) REFERENCES pastes(id) ON DELETE CASCADE)");
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_expires ON pastes(expires_at)");
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_pastes_public_created ON pastes(visibility,created_at DESC,id)");
+    db->execSqlSync("CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag,paste_id)");
+    LOG_INFO << "PasteBox database ready";
 }
 
 int main() {
-    drogon::app().loadConfigFile("../config.json");
-
-    drogon::app().registerBeginningAdvice([]() {
-        initDatabase();
+    drogon::app().loadConfigFile(security::env("PASTEBOX_CONFIG", "../config.json"));
+    drogon::app().registerBeginningAdvice(initDatabase);
+    static security::Limiter requests, writes;
+    drogon::app().registerPreRoutingAdvice([](const drogon::HttpRequestPtr &req,
+        drogon::AdviceCallback &&callback, drogon::AdviceChainCallback &&next) {
+        if (req->path().rfind("/api/", 0) != 0) { next(); return; }
+        const auto origin = security::env("PASTEBOX_ORIGIN", "https://pastebox.micutu.com");
+        if (req->method() == drogon::Options) {
+            if (!req->getHeader("Origin").empty() && req->getHeader("Origin") != origin) {
+                callback(security::error(drogon::k403Forbidden, "Origin not allowed")); return;
+            }
+            auto response = drogon::HttpResponse::newHttpResponse();
+            response->setStatusCode(drogon::k204NoContent);
+            response->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            response->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password, X-Owner-Token, X-Requested-With, X-Confirm-Burn");
+            response->addHeader("Access-Control-Max-Age", "600");
+            callback(response); return;
+        }
+        const bool mutation = req->method() == drogon::Post || req->method() == drogon::Put || req->method() == drogon::Delete;
+        if (mutation && (req->getHeader("X-Requested-With") != "PasteBox" ||
+            (!req->getHeader("Origin").empty() && req->getHeader("Origin") != origin) ||
+            req->getHeader("Sec-Fetch-Site") == "cross-site")) {
+            callback(security::error(drogon::k403Forbidden, "Request origin or required header is invalid")); return;
+        }
+        const auto ip = security::clientIp(req);
+        if (!requests.allow(ip, 10, 30) || (mutation && !writes.allow(ip, 0.5, 12))) {
+            auto response = security::error(drogon::k429TooManyRequests, "Too many requests. Please try again shortly.");
+            response->addHeader("Retry-After", mutation ? "2" : "1");
+            callback(response); return;
+        }
+        if ((req->method() == drogon::Post || req->method() == drogon::Put) &&
+            req->getHeader("Content-Type").rfind("application/json", 0) != 0) {
+            callback(security::error(drogon::k415UnsupportedMediaType, "Use application/json")); return;
+        }
+        next();
     });
-
-    // Rate limiting middleware
-    drogon::app().registerPreHandlingAdvice(
-        [](const drogon::HttpRequestPtr &req,
-           drogon::AdviceCallback &&callback,
-           drogon::AdviceChainCallback &&chainCallback) {
-            auto ip = req->peerAddr().toIp();
-            if (!checkRateLimit(ip)) {
-                Json::Value ret;
-                ret["error"] = "Rate limit exceeded. Please slow down.";
-                auto resp = drogon::HttpResponse::newHttpJsonResponse(ret);
-                resp->setStatusCode(drogon::k429TooManyRequests);
-                resp->addHeader("Retry-After", "1");
-                callback(resp);
-                return;
-            }
-            chainCallback();
-        });
-
-    // Global CORS for OPTIONS preflight
-    drogon::app().registerPreRoutingAdvice(
-        [](const drogon::HttpRequestPtr &req,
-           drogon::AdviceCallback &&callback,
-           drogon::AdviceChainCallback &&chainCallback) {
-            if (req->method() == drogon::Options) {
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->addHeader("Access-Control-Allow-Origin", "https://pastebox.micutu.com");
-                resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-                resp->addHeader("Access-Control-Allow-Headers", "Content-Type, X-Password, X-Requested-With");
-                resp->addHeader("Access-Control-Max-Age", "86400");
-                resp->addHeader("X-Content-Type-Options", "nosniff");
-                resp->addHeader("X-Frame-Options", "DENY");
-                resp->addHeader("Vary", "Origin");
-                callback(resp);
-                return;
-            }
-            chainCallback();
-        });
-
-    // Fallback: serve index.html for SPA routes
-    drogon::app().setCustom404Page(
-        drogon::HttpResponse::newFileResponse("./public/index.html"),
-        false);
-
-    // Expiration cleanup every 60 seconds
-    drogon::app().getLoop()->runEvery(60.0, []() { cleanupExpired(); });
-
-    // Rate limit map cleanup every 5 minutes
-    drogon::app().getLoop()->runEvery(300.0, []() { cleanupRateLimits(); });
-
-    std::cout << "[PasteBox] Starting on http://localhost:7777" << std::endl;
+    drogon::app().registerPreSendingAdvice([](const drogon::HttpRequestPtr &req, const drogon::HttpResponsePtr &response) {
+        response->addHeader("X-Content-Type-Options", "nosniff");
+        response->addHeader("Referrer-Policy", "no-referrer");
+        response->addHeader("Strict-Transport-Security", "max-age=31536000");
+        response->addHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+        response->addHeader("X-Frame-Options", "SAMEORIGIN");
+        response->addHeader("Content-Security-Policy",
+            "default-src 'self'; script-src 'self' https://analytics.micutu.com https://static.cloudflareinsights.com; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
+            "connect-src 'self' https://analytics.micutu.com https://cloudflareinsights.com; "
+            "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'");
+        if (req->path().rfind("/api/", 0) == 0) {
+            response->addHeader("Cache-Control", "no-store");
+            response->addHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
+            response->addHeader("Access-Control-Allow-Origin", security::env("PASTEBOX_ORIGIN", "https://pastebox.micutu.com"));
+            response->addHeader("Vary", "Origin");
+        } else if (req->path() == "/" || req->path() == "/index.html") {
+            response->addHeader("Cache-Control", "no-cache");
+        }
+    });
+    drogon::app().setCustom404Page(security::error(drogon::k404NotFound, "Resource not found"), false);
+    drogon::app().getLoop()->runEvery(60, [] {
+        drogon::app().getDbClient()->execSqlAsync(
+            "DELETE FROM pastes WHERE expires_at IS NOT NULL AND expires_at <= datetime('now')",
+            [](const drogon::orm::Result &) {},
+            [](const drogon::orm::DrogonDbException &) { LOG_ERROR << "Expiration cleanup failed"; });
+    });
     drogon::app().run();
-    return 0;
 }

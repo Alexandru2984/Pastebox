@@ -42,3 +42,11 @@ Boundaries: browser -> Cloudflare -> origin nginx or tunnel ingress -> loopback 
 7. Cloudflare, hosting provider and existing analytics are external dependencies. No new vendor is required for this release. Regulatory applicability and notification obligations need operator/legal assessment; this audit does not establish compliance.
 
 References: [OWASP object authorization](https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/), [OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Review method: [ciso-review skill](/home/micu/.codex/skills/ciso-review/SKILL.md).
+
+## Stage 2 implementation and verification
+
+Implemented owner capabilities (256 random bits; SHA-256 digest in SQLite), private owner-only reads, read-only passwords, explicit one-time reveal with atomic consumption shared by JSON/raw, privacy/expiry/password inheritance on forks, versioned scrypt (N=16384, r=8, p=5; legacy hash upgrade), transactional tags/mutations, strict request validation, bounded request/password/write budgets and database page ceiling, JSON 404s, API no-store/noindex and security headers on static/error responses. New IDs contain 64 random bits; secrecy relies on a private owner capability/password, not an ID alone.
+
+Verification: isolated C++ release build and 17 API regression scenarios, including eight simultaneous mixed raw/JSON reads (exactly one receives content), ownership and private bypass checks, legacy migration, input abuse and UTF-8 limits. Frontend ownership/reveal regressions supplement the existing suite. The active production executable/data have not been changed at this stage.
+
+Remaining: proxy mode is opt-in until a sanitized ingress is configured; the live nginx headers must be aligned at rollout. A page ceiling bounds main database growth, not total backup/log/WAL usage. In-memory throttles reset on restart and local host access is trusted only under explicit proxy mode. Owner capabilities in browser storage require the same XSS protections as other browser credentials. Legacy private access and legacy mutation recovery require operator verification.

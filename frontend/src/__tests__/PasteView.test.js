@@ -37,6 +37,7 @@ const mockPaste = {
   created_at: new Date().toISOString(),
   tags: ['demo'],
   size: 22,
+  can_manage: true,
   burned: false
 };
 
@@ -144,4 +145,21 @@ describe('PasteView', () => {
       expect(body).toContain('demo');
     });
   });
+});
+
+it('does not offer edit access to a reader', async () => {
+  getPaste.mockResolvedValueOnce({ ...mockPaste, can_manage: false });
+  render(PasteView, { props: { pasteId: 'readerPaste' } });
+  await screen.findByText('Test Paste');
+  expect(screen.queryByRole('button', { name: /edit paste/i })).toBeNull();
+});
+
+it('waits for explicit confirmation before revealing a one-time paste', async () => {
+  const challenge = Object.assign(new Error('Confirm before revealing'), { burnRequired: true });
+  getPaste.mockRejectedValueOnce(challenge);
+  getPaste.mockResolvedValueOnce({ ...mockPaste, burned: true });
+  render(PasteView, { props: { pasteId: 'oneTime' } });
+  await fireEvent.click(await screen.findByRole('button', { name: /reveal one-time/i }));
+  await screen.findByText('Test Paste');
+  expect(getPaste).toHaveBeenLastCalledWith('oneTime', '', true);
 });
