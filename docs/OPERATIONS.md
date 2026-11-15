@@ -12,7 +12,7 @@ The rollout creates `/var/backups/pastebox/release-TIMESTAMP-SUFFIX` with mode 0
 
 On command failure after staging, the script restores the previous binary, static tree, app config, nginx vhost and app environment drop-in, restarts PasteBox, then validates/reloads nginx. Schema additions are compatible with the previous artifact. It does not overwrite the live database with an earlier snapshot, which would discard new user writes. A rollback to the previous application reintroduces its authorization weaknesses: contain access immediately if a security rollback is needed.
 
-For later manual rollback: stop PasteBox, install the saved binary and public tree back to the exact service paths, restore configs/drop-in, run `nginx -t`, `systemctl daemon-reload`, restart PasteBox, reload nginx and verify readiness. Keep the current database. Database restoration is a separate incident-recovery action requiring a maintenance window and explicit evaluation of new writes; preserve the current DB/WAL before any restore.
+For later manual rollback: stop PasteBox, install the saved binary and public tree back to the exact service paths, restore configs/drop-in, run `nginx -t`, `systemctl daemon-reload`, restart PasteBox, reload nginx and verify readiness. Keep the current database. If reverting to a build predating revision support, keep writes restricted until a forward fix and client reload: the older build cannot enforce revision preconditions or record history. Database restoration is a separate incident-recovery action requiring a maintenance window and explicit evaluation of new writes; preserve the current DB/WAL before any restore.
 
 ## Smoke checks
 
@@ -20,6 +20,7 @@ For later manual rollback: stop PasteBox, install the saved binary and public tr
 - Root serves the new HTML, built asset URLs return 200 with immutable caching, and `/robots.txt` + `/sitemap.xml` describe this application.
 - API errors are JSON with `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Robots-Tag: noindex...` and a strict CSP.
 - Embed documents allow framing; their API returns only public, unprotected, reusable content. Other pages stay same-origin framed.
+- `npm --prefix frontend run smoke:ui` verifies an unpublished Markdown draft and 375px/320px layouts. It blocks writes and third-party requests; it never publishes a paste. Install Playwright Chromium first and optionally set `PLAYWRIGHT_CHROMIUM_EXECUTABLE`.
 - Do not use customer IDs for authorization/burn tests. Run destructive/concurrency checks only against the disposable harness.
 - Shared nginx validates as a whole; only the PasteBox vhost is changed. No Cloudflare tunnel or other application's configuration needs to change.
 

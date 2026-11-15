@@ -370,15 +370,18 @@ class API(unittest.TestCase):
         self.assertIn(429,codes)
 
     def test_z_distributed_password_work_has_a_global_budget(self):
-        # Last scenario: intentionally exhausts the shared cryptographic budget.
+        # Slow CPUs may already be below the quota. Verify admitted work over
+        # the measured interval, and retry headers whenever throttling occurs.
         owned = self.create(content='owner access stays available')
         def attempt(number):
             return self.request(method='POST',data={'content':'fixture','password':'distributed password'},headers={'X-Real-IP':f'203.0.113.{number+1}'})
+        started = time.monotonic()
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(attempt,range(32)))
+        elapsed = time.monotonic()-started
         codes = [code for code,_,_ in results]
         self.assertIn(201,codes)
-        self.assertIn(429,codes)
+        self.assertLessEqual(codes.count(201),8+4*elapsed)
         self.assertTrue(all(code in (201,429) for code in codes),codes)
         for code,body,headers in results:
             if code == 429:

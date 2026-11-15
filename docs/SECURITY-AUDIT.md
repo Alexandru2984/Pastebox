@@ -91,7 +91,7 @@ References: [Marked renderer API](https://marked.js.org/using_pro), [Marked work
 
 ## Continuation: aggregate password CPU budget
 
-Per-IP throttling did not bound expensive scrypt work across many visitor addresses. Derivation now also consumes a process-wide token budget (4/second, burst 8), covering password creation, verification and legacy upgrades. Excess work returns 429/no-store with a one-second retry hint before running scrypt. Owner-key reads bypass password derivation. This bounds steady-state cryptographic work; it is not a claim of complete DDoS protection. A distributed-client fixture exhausts the budget while readiness and owner access remain available.
+Per-IP throttling did not bound expensive scrypt work across many visitor addresses. Derivation now also consumes a process-wide token budget (4/second, burst 8), covering password creation, verification and legacy upgrades. Excess work returns 429/no-store with a one-second retry hint before running scrypt. Owner-key reads bypass password derivation. This bounds steady-state cryptographic work; it is not a claim of complete DDoS protection. A distributed-client fixture checks admitted work against the burst/refill budget, verifies retry headers when throttled, and confirms readiness/owner access remain available. CPU-limited machines may already be slower than the quota and legitimately accept every offered request.
 
 ## Continuation: legacy password upgrade during fork
 
