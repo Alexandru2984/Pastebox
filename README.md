@@ -65,7 +65,7 @@ PASTEBOX_TEST_BINARY=/tmp/pastebox-build/backend \
 PASTEBOX_TEST_PUBLIC=/tmp/pastebox-public npm run test:e2e
 ```
 
-The Python API suite always creates its own server/database. It does not accept a remote base URL. `backend/test.sh /path/to/test-build/backend` runs this same isolated suite; the old production-default shell tests have been replaced. Playwright starts another disposable backend on loopback port 19779 and runs desktop/mobile workflows.
+Each Python API case creates its own server/database, including fresh process-wide quotas. It does not accept a remote base URL. `backend/test.sh /path/to/test-build/backend` runs this same isolated suite; the old production-default shell tests have been replaced. Each Playwright case also starts a separate disposable backend on an automatically selected loopback port. Desktop/mobile tests keep production throttles enabled and do not retry failed mutations.
 
 Current suites: 99 frontend cases, 28 API security/lifecycle cases and 18 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
 
