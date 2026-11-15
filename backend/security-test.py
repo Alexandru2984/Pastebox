@@ -156,6 +156,19 @@ class API(unittest.TestCase):
             stored = connection.execute("SELECT password_hash FROM pastes WHERE id='legacyPassword'").fetchone()[0]
         self.assertTrue(stored.startswith('scrypt$16384$8$5$'))
 
+    def test_legacy_fork_inherits_the_upgraded_password_verifier(self):
+        password = 'legacy-fork-password'
+        with sqlite3.connect(self.database) as connection:
+            connection.execute("INSERT INTO pastes(id,title,content,language,password_hash,visibility) VALUES('legacyForkCase','Legacy fork','fixture','plaintext',?,'public')",(hashlib.sha256(password.encode()).hexdigest(),))
+        code, fork, _ = self.request('/api/pastes/legacyForkCase/fork','POST',{},password=password)
+        self.assertEqual(code,201)
+        with sqlite3.connect(self.database) as connection:
+            original = connection.execute("SELECT password_hash FROM pastes WHERE id='legacyForkCase'").fetchone()[0]
+            inherited = connection.execute('SELECT password_hash FROM pastes WHERE id=?',(fork['id'],)).fetchone()[0]
+        self.assertTrue(original.startswith('scrypt$'))
+        self.assertEqual(inherited,original)
+        self.assertEqual(self.request('/api/pastes/'+fork['id'],password=password)[0],200)
+
     def test_owner_key_verification_does_not_consume_burn(self):
         paste = self.create(burn_after_read=True,visibility='private')
         path = '/api/pastes/'+paste['id']

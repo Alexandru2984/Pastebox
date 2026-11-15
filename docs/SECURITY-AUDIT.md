@@ -92,3 +92,7 @@ References: [Marked renderer API](https://marked.js.org/using_pro), [Marked work
 ## Continuation: aggregate password CPU budget
 
 Per-IP throttling did not bound expensive scrypt work across many visitor addresses. Derivation now also consumes a process-wide token budget (4/second, burst 8), covering password creation, verification and legacy upgrades. Excess work returns 429/no-store with a one-second retry hint before running scrypt. Owner-key reads bypass password derivation. This bounds steady-state cryptographic work; it is not a claim of complete DDoS protection. A distributed-client fixture exhausts the budget while readiness and owner access remain available.
+
+## Continuation: legacy password upgrade during fork
+
+Fork authorization may upgrade a legacy SHA-256 verifier inside its transaction. The original row object still held the old verifier, so copying that object could reintroduce a weak verifier into the new paste. Fork now reloads the stored verifier after authorization before copying protection. Regression seeds a legacy fixture and checks both source and fork use the same upgraded scrypt verifier; protected reading still succeeds.

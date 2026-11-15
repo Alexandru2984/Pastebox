@@ -331,6 +331,10 @@ void PasteController::forkPaste(const HttpRequestPtr &req, Callback &&callback, 
         transaction(std::move(callback),[req,id,json,newId,token](const DbClientPtr &db) {
             auto row = find(db,id); authorize(row,req,false,db);
             if (row["burn_after_read"].as<int>() != 0) fail(k409Conflict,"One-time pastes cannot be forked");
+            // Authorization can upgrade a legacy password verifier in this transaction.
+            // Inherit the stored verifier after that upgrade, rather than the stale row.
+            const auto protection = db->execSqlSync("SELECT password_hash FROM pastes WHERE id=?",id);
+            const auto passwordHash = value(protection[0],"password_hash");
             auto visibility = value(row,"visibility");
             if (json.isMember("visibility")) {
                 auto next = json["visibility"].asString();
@@ -342,7 +346,7 @@ void PasteController::forkPaste(const HttpRequestPtr &req, Callback &&callback, 
                 "VALUES(?,?,?,?,?,?,?,?,nullif(?,''))",newId,
                 json.get("title",(value(row,"title").size() <= 192 ? "Fork of " + value(row,"title") : value(row,"title"))).asString(),
                 json.get("content",value(row,"content")).asString(),json.get("language",value(row,"language")).asString(),
-                visibility,value(row,"password_hash"),digest(token),
+                visibility,passwordHash,digest(token),
                 parent,value(row,"expires_at"));
             db->execSqlSync("INSERT INTO tags(paste_id,tag) SELECT ?,tag FROM tags WHERE paste_id=?",newId,id);
             tags(db,newId,json);
