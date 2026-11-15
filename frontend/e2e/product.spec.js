@@ -4,11 +4,11 @@ test.beforeEach(async ({ page }) => {
   await page.route('https://**/*',route => route.abort());
 });
 
-async function create(page, {title = 'Browser lifecycle',content = 'const answer = 42;\nconsole.log(answer);',visibility = 'public',password = '',burn = false} = {}) {
+async function create(page, {title = 'Browser lifecycle',content = 'const answer = 42;\nconsole.log(answer);',visibility = 'public',password = '',burn = false,language = 'javascript'} = {}) {
   await page.goto('/');
   await page.getByRole('textbox',{name:'Paste title',exact:true}).fill(title);
   await page.getByRole('textbox',{name:'Paste content',exact:true}).fill(content);
-  await page.getByRole('combobox',{name:'Language',exact:true}).selectOption('javascript');
+  await page.getByRole('combobox',{name:'Language',exact:true}).selectOption(language);
   await page.getByRole('combobox',{name:'Paste visibility',exact:true}).selectOption(visibility);
   if (password) await page.getByLabel('Password protection',{exact:true}).fill(password);
   if (burn) await page.getByRole('checkbox',{name:'Burn after read'}).check();
@@ -142,4 +142,49 @@ test('a stale browser tab preserves its text when saving is rejected', async ({p
   await page.reload();
   await expect(page.getByRole('textbox',{name:'Code content'})).toHaveText('first tab saved this');
   await other.close();
+});
+
+test('Markdown drafts preview without publishing and load the parser on demand', async ({page}) => {
+  const parserRequests = [];
+  page.on('request',request => {if (/markdown[.-](worker|sanitize)/.test(request.url())) parserRequests.push(request.url());});
+  await page.goto('/');
+  await page.getByRole('combobox',{name:'Language',exact:true}).selectOption('markdown');
+  await page.getByRole('textbox',{name:'Paste content',exact:true}).fill('# Draft preview\n\n- [x] first task\n- [ ] next task');
+  expect(parserRequests).toEqual([]);
+  await page.getByRole('button',{name:'Preview Markdown draft',exact:true}).click();
+  const preview = page.frameLocator('iframe[title="Markdown preview"]');
+  await expect(preview.getByRole('heading',{name:'Draft preview',exact:true})).toBeVisible();
+  await expect(preview.locator('body')).toContainText('☑');
+  expect(parserRequests.length).toBeGreaterThan(0);
+  await page.setViewportSize({width:320,height:812});
+  const sourceButton = page.getByRole('button',{name:'View Markdown draft source',exact:true});
+  const sourceBox = await sourceButton.boundingBox();
+  const panelBox = await page.locator('.editor-panel').boundingBox();
+  expect(sourceBox.x+sourceBox.width).toBeLessThanOrEqual(panelBox.x+panelBox.width);
+  await expect(page).not.toHaveURL(/#\/paste\//);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button',{name:'View Markdown draft source',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Paste content',exact:true})).toHaveValue('# Draft preview\n\n- [x] first task\n- [ ] next task');
+});
+
+test('Markdown preview blocks scripts, parent access and remote image requests', async ({page}) => {
+  const remoteImages = [];
+  page.on('request',request => {if (request.url().includes('tracker.invalid')) remoteImages.push(request.url());});
+  const content = '# Preview safety\n\n<script>parent.__markdownExecuted = true</script>\n\n<img src="https://tracker.invalid/html" onerror="parent.__markdownExecuted = true">\n\n![hidden image](https://tracker.invalid/markdown)\n\n[unsafe](javascript:alert(1))\n\n[good link](https://example.com/docs)';
+  await create(page,{title:'Markdown isolation',content,visibility:'private',language:'markdown'});
+  await page.getByRole('button',{name:'Preview Markdown',exact:true}).click();
+  const preview = page.frameLocator('iframe[title="Markdown preview"]');
+  await expect(preview.getByRole('heading',{name:'Preview safety',exact:true})).toBeVisible();
+  await expect(preview.locator('script,img,svg,math,form,iframe')).toHaveCount(0);
+  await expect(preview.locator('a[href^="javascript:"]')).toHaveCount(0);
+  await expect(preview.getByRole('link',{name:'good link',exact:true})).toHaveAttribute('rel','noopener noreferrer');
+  await expect(preview.getByRole('link',{name:'good link',exact:true})).toHaveAttribute('target','_blank');
+  expect(await page.evaluate(() => window.__markdownExecuted)).toBeUndefined();
+  expect(await preview.locator('body').evaluate(() => {try {window.parent.localStorage.getItem('pastebox-library-v1');return false;} catch {return true;}})).toBe(true);
+  expect(remoteImages).toEqual([]);
+  await page.getByRole('combobox',{name:'Color theme',exact:true}).selectOption('light');
+  await expect(preview.locator('body')).toHaveCSS('background-color','rgb(246, 248, 250)');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button',{name:'View Markdown source',exact:true}).click();
+  await expect(page.getByRole('textbox',{name:'Code content'})).toContainText('<script>parent.__markdownExecuted = true</script>');
 });

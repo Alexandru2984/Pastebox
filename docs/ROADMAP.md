@@ -88,3 +88,9 @@ No cross-device account, off-host backup destination or remote push is assumed b
 ### Revision stage delivered
 
 Implemented owner-only bounded history, line comparison with a large-file fallback, restore as a new head, explicit history clearing and optimistic edit preconditions. Current privacy/expiry are preserved on restore, one-time pastes remain snapshot-free, and stale editor content remains available after conflicts. API and browser regressions run only on disposable data.
+
+### Markdown stage delivered
+
+Drafts and saved Markdown now have an on-demand preview with worker deadlines, a strict sanitized HTML subset, isolated framing and hidden remote images. Private reading content/owner keys remain in separate origins; preview cannot read parent storage. The full source is retained on every preview error. New browser checks cover preview without publishing, hostile input, worker/sanitizer loading on demand, theme changes and narrow layouts.
+
+The expanded app entry is about 143 KB / 53 KB gzip; the 50 KB parser worker and 30 KB sanitizer chunk load only when preview is opened. Accounts, encryption, multi-file documents, moderation and off-host recovery remain separate future work.

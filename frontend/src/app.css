@@ -253,3 +253,12 @@ dialog::backdrop { background:#0009; backdrop-filter:blur(4px); }
 .diff-removed { background:color-mix(in srgb,var(--red) 10%,transparent); }
 .revision-diff h3 { margin:16px 0 8px; }
 @media(max-width:760px) { .revision-layout { grid-template-columns:1fr; } .revision-list { max-height:210px; } .revision-choice { min-height:65px; } .revision-body { padding:13px; } .owner-panel>div { flex-wrap:wrap; gap:12px; } .diff-number { width:28px; } }
+.markdown-preview { padding:0; }
+.markdown-preview iframe { display:block; border:0; width:100%; height:520px; min-width:0; }
+.markdown-preview>.field-hint { padding:10px 16px; border-top:1px solid var(--border); margin:0; }
+.markdown-preview>.notice,.markdown-preview>p[role=status] { margin:18px; }
+@media(max-width:760px) { .markdown-preview iframe { height:460px; } .code-controls { flex-wrap:wrap; row-gap:12px; } }
+.composer-actions { display:flex; align-items:center; gap:12px; min-width:0; }
+.composer-actions .text-button { font-size:11px; }
+@media(max-width:430px) { .composer-actions { gap:9px; } .composer-actions select { max-width:115px; } }
+@media(max-width:430px) { .editor-panel>.panel-heading { flex-wrap:wrap; } .composer-actions { flex:1; justify-content:flex-end; } .editor-panel .panel-label { flex-shrink:0; } }

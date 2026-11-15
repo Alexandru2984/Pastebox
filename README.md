@@ -11,6 +11,7 @@ Live: [pastebox.micutu.com](https://pastebox.micutu.com/)
 - Explore public titles/tags with search, language/tag filters and newest/oldest/most-viewed sorting.
 - Keep owned snippets and favorites in a browser-local library; verify/import an owner key on another browser.
 - Write with starter templates, text-file import, JSON formatting, Tab indentation, word wrap, UTF-8 byte counts and optional public draft recovery.
+- Preview Markdown drafts before publishing or switch to preview while reading. Raw HTML stays inert; external images are hidden, and links open separately without an opener/referrer.
 - Read with syntax highlighting loaded per language, line numbers, wrapping and font controls. Large snippets avoid expensive highlighting/line-number DOMs.
 - Choose public, unlisted or private access, a reading password, expiration, or explicit one-time reveal.
 - Embed public, unprotected, reusable snippets with `/embed/ID`.
@@ -23,6 +24,8 @@ Each new paste returns an **owner key** once. Its digest is stored on the server
 A **read password grants reading only**. Public pastes can be discovered in Explore; unlisted pastes require the link; private pastes require the owner key, including on raw/fork routes. One-time pastes wait for confirmation and are atomically deleted before content is returned. Receiving the content cannot be undone and does not erase copies already made by a reader. Forks inherit protection and expiration; protected provenance is omitted.
 
 Owner keys never appear in share URLs. Read passwords and paste bodies are excluded from the library. Optional drafts store **public, unprotected, reusable** content only; choosing private, unlisted, password or one-time access removes the saved draft. The existing self-hosted Umami integration sends manual homepage/Explore pageviews only, without paste IDs, titles, form values or referrers, and respects Do Not Track/GPC.
+
+Markdown parsing runs in a disposable Web Worker with a startup deadline and a 1.5-second parsing budget. Preview is limited to 128 KiB / 3,000 lines and 5,000 generated elements; the full 512 KiB source remains available. Parser and sanitizer chunks load only when preview is opened. Output is sanitized with a small HTML allowlist, then placed in a sandbox without scripts or same-origin access and a restrictive embedded CSP. External images/forms/raw HTML are not rendered as active content; only explicit web-link clicks can leave the preview.
 
 Content is plaintext in SQLite. Access control and HTTPS do **not** provide end-to-end encryption. Browser scripts on this origin are trusted, so protect the origin and analytics deployment. No account-based recovery exists.
 
@@ -64,7 +67,7 @@ PASTEBOX_TEST_PUBLIC=/tmp/pastebox-public npm run test:e2e
 
 The Python API suite always creates its own server/database. It does not accept a remote base URL. `backend/test.sh /path/to/test-build/backend` runs this same isolated suite; the old production-default shell tests have been replaced. Playwright starts another disposable backend on loopback port 19779 and runs desktop/mobile workflows.
 
-Current suites: 85 frontend cases, 26 API security/lifecycle cases and 14 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
+Current suites: 99 frontend cases, 26 API security/lifecycle cases and 18 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
 
 GitHub Actions performs clean installs, hardened C++ build, API regressions, frontend tests/build, dependency audit and browser flows. Actions are pinned to commit SHAs; credentials are read-only and there is no deployment or production secret in CI. Dependabot opens weekly dependency update PRs. A workflow file is not evidence that remote CI has already run.
 
