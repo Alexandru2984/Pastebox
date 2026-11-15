@@ -356,6 +356,25 @@ class API(unittest.TestCase):
             codes.append(self.request('/api/health',headers={'X-Forwarded-For':f'198.51.100.{i}'})[0])
         self.assertIn(429,codes)
 
+    def test_z_distributed_password_work_has_a_global_budget(self):
+        # Last scenario: intentionally exhausts the shared cryptographic budget.
+        owned = self.create(content='owner access stays available')
+        def attempt(number):
+            return self.request(method='POST',data={'content':'fixture','password':'distributed password'},headers={'X-Real-IP':f'203.0.113.{number+1}'})
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(attempt,range(32)))
+        codes = [code for code,_,_ in results]
+        self.assertIn(201,codes)
+        self.assertIn(429,codes)
+        self.assertTrue(all(code in (201,429) for code in codes),codes)
+        for code,body,headers in results:
+            if code == 429:
+                self.assertIn('Password checks are busy',body['error'])
+                self.assertEqual(headers['Retry-After'],'1')
+                self.assertEqual(headers['Cache-Control'],'no-store')
+        self.assertEqual(self.request('/api/health')[0],200)
+        self.assertEqual(self.request('/api/pastes/'+owned['id'],token=owned['owner_token'])[0],200)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

@@ -16,7 +16,7 @@ using namespace drogon::orm;
 namespace {
 constexpr size_t MAX_CONTENT = 512 * 1024;
 constexpr int HISTORY_LIMIT = 10;
-struct Failure { HttpStatusCode status; std::string message; bool password = false; bool owner = false; bool burn = false; };
+struct Failure { HttpStatusCode status; std::string message; bool password = false; bool owner = false; bool burn = false; std::string retryAfter = "60"; };
 void fail(HttpStatusCode code, const std::string &message) { throw Failure{code, message}; }
 HttpResponsePtr response(const Json::Value &json, HttpStatusCode code = k200OK) {
     auto result = HttpResponse::newHttpJsonResponse(json); result->setStatusCode(code); return result;
@@ -29,7 +29,7 @@ template<class Work> void handle(PasteController::Callback callback, Work work) 
         if (e.owner) json["owner_required"] = true;
         if (e.burn) json["burn_confirmation_required"] = true;
         auto res = response(json, e.status);
-        if (e.status == k429TooManyRequests) res->addHeader("Retry-After", "60");
+        if (e.status == k429TooManyRequests) res->addHeader("Retry-After", e.retryAfter);
         callback(res);
     } catch (const std::exception &) {
         LOG_ERROR << "Paste operation failed";
@@ -55,6 +55,10 @@ bool equal(const std::string &a, const std::string &b) {
     return a.size() == b.size() && CRYPTO_memcmp(a.data(), b.data(), a.size()) == 0;
 }
 std::string derive(const std::string &password, const std::string &salt) {
+    // An IP budget alone cannot bound CPU under distributed password traffic.
+    static security::Limiter passwordWork;
+    if (!passwordWork.allow("scrypt",4,8))
+        throw Failure{k429TooManyRequests,"Password checks are busy. Please retry shortly.",false,false,false,"1"};
     unsigned char bytes[32];
     // OWASP's 16 MiB option: N=2^14, r=8, p=5. Fits the service's 128 MiB cap.
     if (EVP_PBE_scrypt(password.data(), password.size(), reinterpret_cast<const unsigned char *>(salt.data()),

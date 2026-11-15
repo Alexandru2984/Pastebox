@@ -94,3 +94,7 @@ Implemented owner-only bounded history, line comparison with a large-file fallba
 Drafts and saved Markdown now have an on-demand preview with worker deadlines, a strict sanitized HTML subset, isolated framing and hidden remote images. Private reading content/owner keys remain in separate origins; preview cannot read parent storage. The full source is retained on every preview error. New browser checks cover preview without publishing, hostile input, worker/sanitizer loading on demand, theme changes and narrow layouts.
 
 The expanded app entry is about 143 KB / 53 KB gzip; the 50 KB parser worker and 30 KB sanitizer chunk load only when preview is opened. Accounts, encryption, multi-file documents, moderation and off-host recovery remain separate future work.
+
+### Password resource guard delivered
+
+Added an aggregate scrypt budget alongside per-IP limits, with an explicit retry response. Distributed password traffic cannot make derivation run without a process-wide cap; owner-key reads do not consume this budget. Regression uses disposable clients/database and verifies readiness remains available.

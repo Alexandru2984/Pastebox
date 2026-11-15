@@ -88,3 +88,7 @@ The renderer escapes raw HTML, replaces image syntax with text and uses text sym
 Tests cover malicious HTML/URLs/namespace markup, size/complexity limits, worker timeout/cleanup, real browser parent-storage isolation, absence of remote image requests, theme changes and source preservation. Package audit reports no runtime advisories after adding the current Marked/DOMPurify releases; the existing two low build-only findings remain.
 
 References: [Marked renderer API](https://marked.js.org/using_pro), [Marked worker guidance](https://marked.js.org/using_advanced#workers), [DOMPurify configuration and security notes](https://github.com/cure53/DOMPurify/blob/main/README.md). Marked output is never inserted into the application DOM without sanitization.
+
+## Continuation: aggregate password CPU budget
+
+Per-IP throttling did not bound expensive scrypt work across many visitor addresses. Derivation now also consumes a process-wide token budget (4/second, burst 8), covering password creation, verification and legacy upgrades. Excess work returns 429/no-store with a one-second retry hint before running scrypt. Owner-key reads bypass password derivation. This bounds steady-state cryptographic work; it is not a claim of complete DDoS protection. A distributed-client fixture exhausts the budget while readiness and owner access remain available.

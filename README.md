@@ -67,7 +67,7 @@ PASTEBOX_TEST_PUBLIC=/tmp/pastebox-public npm run test:e2e
 
 The Python API suite always creates its own server/database. It does not accept a remote base URL. `backend/test.sh /path/to/test-build/backend` runs this same isolated suite; the old production-default shell tests have been replaced. Playwright starts another disposable backend on loopback port 19779 and runs desktop/mobile workflows.
 
-Current suites: 99 frontend cases, 26 API security/lifecycle cases and 18 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
+Current suites: 99 frontend cases, 27 API security/lifecycle cases and 18 desktop/mobile browser flows. The generated Drogon placeholder test is excluded from the verification count.
 
 GitHub Actions performs clean installs, hardened C++ build, API regressions, frontend tests/build, dependency audit and browser flows. Actions are pinned to commit SHAs; credentials are read-only and there is no deployment or production secret in CI. Dependabot opens weekly dependency update PRs. A workflow file is not evidence that remote CI has already run.
 
@@ -108,7 +108,7 @@ A one-time read first returns `409` with `burn_confirmation_required`; explicitl
 
 - `PASTEBOX_ORIGIN`: allowed browser origin, default `https://pastebox.micutu.com`.
 - `PASTEBOX_TRUST_PROXY=1`: opt-in loopback proxy trust. Enable only when nginx overwrites `X-Real-IP`. Forwarded-for chains are ignored.
-- Request, write and password budgets have bounded in-memory state and reset on restart. Database growth is capped at 65,536 pages, about 256 MiB with default 4 KiB pages; logs/WAL/backups need separate disk monitoring.
+- Request, write and password budgets have bounded in-memory state and reset on restart. Scrypt also has a process-wide budget (4 derivations/second, burst 8); distributed excess receives `429` with `Retry-After: 1`. Owner-key reads and unprotected operations do not need a password derivation. Database growth is capped at 65,536 pages, about 256 MiB with default 4 KiB pages; logs/WAL/backups need separate disk monitoring.
 - Production retains the existing dedicated service user and systemd restrictions. This release does not upgrade shared host libraries or modify other applications.
 
 The VPS-specific tested rollout entrypoint is:
